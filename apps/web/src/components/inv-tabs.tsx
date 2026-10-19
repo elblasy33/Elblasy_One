@@ -1,5 +1,5 @@
 "use client";
-import { Boxes, ClipboardList, Package, Truck } from "lucide-react";
+import { Boxes, ClipboardList, Factory, Package, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -9,6 +9,7 @@ import { useActiveConnection, useMe } from "@/lib/queries";
 const TABS: { href: string; label: TKey; icon: typeof Boxes; perm: string[]; exact?: boolean; cap?: string }[] = [
   { href: "/inventory", label: "tab_products", icon: Boxes, perm: ["products.manage"], exact: true },
   { href: "/inventory/stock", label: "tab_stock", icon: Package, perm: ["inventory.adjust", "purchasing.view", "products.manage"] },
+  { href: "/inventory/production", label: "tab_production", icon: Factory, perm: ["products.manage"], cap: "manufacturing" },
   { href: "/inventory/suppliers", label: "tab_suppliers", icon: Truck, perm: ["purchasing.view"], cap: "purchase" },
   { href: "/inventory/purchases", label: "tab_purchases", icon: ClipboardList, perm: ["purchasing.view"], cap: "purchase" },
 ];

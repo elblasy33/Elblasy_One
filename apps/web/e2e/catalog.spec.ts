@@ -89,4 +89,11 @@ test("grocery owner adds weighed and made products, builds a recipe, and imports
   await expect(page.getByText("رز")).toHaveCount(0);
   await page.getByRole("button", { name: "المنتجات المؤرشفة" }).click();
   await expect(page.getByText("رز").first()).toBeVisible();
+
+  // ---- production screen shows the recipe and refuses a batch the components cannot cover
+  await page.goto("/inventory/production");
+  await expect(page.getByRole("heading", { name: "تصنيع دفعة" })).toBeVisible();
+  await expect(page.getByText("كيك").first()).toBeVisible();
+  await expect(page.getByText("المكونات لا تكفي لهذه الكمية.").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "صنّع" }).first()).toBeDisabled();
 });

@@ -128,3 +128,6 @@ export interface Customer { id: number; name: string; phone?: string; email?: st
 export interface CustomerInvoice { id: number; name?: string; date?: string; due?: string; amount_total: number; amount_residual: number; payment_state: string; move_type: string }
 export interface CustomerStatement { customer: Customer; invoices: CustomerInvoice[]; payments: { id: number; name: string; date: string; amount: number; journal: string }[] }
 export interface Receivables { total: number; customers: number; top: { name: string; owed: number }[]; overdue: { count: number; amount: number }; currency: string }
+
+export interface Recipe { template_id: number; name: string; yield: number; uom: string; on_hand: number; can_make: number; components: { template_id: number; name: string; per_unit: number; on_hand: number; uom: string }[] }
+export interface ProductionRun { id: number; name: string; state: string; product: string; qty: number; qty_produced: number }

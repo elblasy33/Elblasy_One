@@ -11,6 +11,7 @@ from elblasy_api.routers import (
     customers,
     money,
     oversight,
+    production,
     purchasing,
     sales,
     setup,
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(money.router)
     app.include_router(oversight.router)
     app.include_router(customers.router)
+    app.include_router(production.router)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

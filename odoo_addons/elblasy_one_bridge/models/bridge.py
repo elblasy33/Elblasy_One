@@ -32,6 +32,7 @@ TRACKED_MODULES = {
     "uom": "uom",
     "sale_stock": "sales_inventory",
     "purchase_stock": "purchase_inventory",
+    "mrp": "manufacturing",
 }
 
 
