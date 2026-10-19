@@ -1,0 +1,93 @@
+"""Connection management against real Odoo Community 18/19 + real PostgreSQL."""
+
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from tests.conftest import make_owner
+
+from elblasy_api.db import get_engine
+from elblasy_api.main import create_app
+
+TARGETS = [("18.0", "http://localhost:8118", "ce18"), ("19.0", "http://localhost:8119", "ce19")]
+
+
+def body(url, db, name="Main", secret="admin"):
+    return {"name": name, "base_url": url, "db_name": db, "login": "admin", "secret": secret}
+
+
+@pytest.fixture(params=TARGETS, ids=[t[0] for t in TARGETS])
+def target(request, client):
+    import httpx
+
+    series, url, db = request.param
+    try:
+        httpx.get(url + "/web/login", timeout=3)
+    except Exception:
+        pytest.skip(f"Odoo {series} unreachable")
+    make_owner(client, f"{uuid.uuid4().hex[:8]}@example.com")
+    return series, url, db
+
+
+def test_connect_health_rotate_revoke(client, target):
+    series, url, db = target
+    r = client.post("/connections", json=body(url, db))
+    assert r.status_code == 201, r.text
+    c = r.json()
+    assert c["odoo_series"] == series and c["compatibility_status"] == "supported"
+    assert c["capabilities"]["pos"] is True and "secret" not in str(c).lower()
+    with get_engine().connect() as conn:
+        ct = conn.execute(
+            text("select secret_ciphertext from odoo_connections where id=:i"), {"i": c["id"]}
+        ).scalar()
+    assert b"admin" not in bytes(ct)
+
+    h = client.get(f"/connections/{c['id']}/health").json()
+    assert h["ok"] and h["compatibility"] == "supported"
+
+    assert (
+        client.put(f"/connections/{c['id']}/credentials", json={"secret": "nope"}).status_code
+        == 422
+    )
+    assert client.get(f"/connections/{c['id']}/health").json()["ok"]  # old secret untouched
+    assert (
+        client.put(f"/connections/{c['id']}/credentials", json={"secret": "admin"}).status_code
+        == 200
+    )
+
+    assert client.delete(f"/connections/{c['id']}").status_code == 204
+    assert client.get(f"/connections/{c['id']}/health").json()["status"] == "revoked"
+    with get_engine().connect() as conn:
+        assert (
+            conn.execute(
+                text("select secret_ciphertext from odoo_connections where id=:i"), {"i": c["id"]}
+            ).scalar()
+            is None
+        )
+
+
+def test_bad_credentials_and_unsafe_url(client, target):
+    _, url, db = target
+    assert client.post("/connections", json=body(url, db, secret="wrong")).status_code == 422
+    r = client.post("/connections", json=body("http://169.254.169.254", db))
+    assert r.status_code == 422 and r.json()["error"]["code"] == "unsafe_url"
+    r = client.post("/connections", json=body("file:///etc/passwd", db))
+    assert r.json()["error"]["code"] == "unsafe_url"
+
+
+def test_tenant_isolation(client, target):
+    _, url, db = target
+    cid = client.post("/connections", json=body(url, db, name="A")).json()["id"]
+    other = TestClient(create_app())
+    make_owner(other, f"{uuid.uuid4().hex[:8]}@example.com", business="Other")
+    assert other.get("/connections").json() == []
+    assert other.get(f"/connections/{cid}/health").status_code == 404
+    assert other.delete(f"/connections/{cid}").status_code == 404
+    assert other.put(f"/connections/{cid}/credentials", json={"secret": "admin"}).status_code == 404
+
+
+def test_duplicate_name_conflict(client, target):
+    _, url, db = target
+    assert client.post("/connections", json=body(url, db, name="Dup")).status_code == 201
+    assert client.post("/connections", json=body(url, db, name="Dup")).status_code == 409

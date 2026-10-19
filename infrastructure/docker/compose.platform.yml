@@ -1,0 +1,9 @@
+# Platform PostgreSQL for local development / tests (throwaway credentials).
+name: elblasy-platform
+services:
+  pg:
+    image: postgres:14
+    environment: {POSTGRES_USER: elblasy, POSTGRES_PASSWORD: elblasy, POSTGRES_DB: elblasy_one}
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes: {pgdata: {}}

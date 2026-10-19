@@ -6,6 +6,7 @@ dependencies = [
     "alembic>=1.20.0",
     "argon2-cffi>=25.1.0",
     "cryptography>=50.0.2",
+    "email-validator>=2.3.0",
     "fastapi>=0.148.0",
     "httpx>=0.28.1",
     "psycopg[binary]>=3.3.6",
@@ -32,14 +33,16 @@ packages = ["src/elblasy_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["B008", "E501"]  # B008: FastAPI Depends(); E501: left to the formatter
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501", "S101", "S105", "S106", "S107"]

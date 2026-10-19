@@ -1,10 +1,11 @@
 import logging
 import uuid
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from elblasy_api.config import get_settings
+from elblasy_api.routers import auth, connections
 
 log = logging.getLogger("elblasy")
 
@@ -24,6 +25,21 @@ def create_app() -> FastAPI:
         response: Response = await call_next(request)
         response.headers["x-correlation-id"] = cid
         return response
+
+    @app.exception_handler(HTTPException)
+    async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
+        cid = getattr(request.state, "correlation_id", None)
+        d = (
+            exc.detail
+            if isinstance(exc.detail, dict)
+            else {"code": "error", "message": str(exc.detail)}
+        )
+        return JSONResponse(
+            status_code=exc.status_code, content={"error": {**d, "correlation_id": cid}}
+        )
+
+    app.include_router(auth.router)
+    app.include_router(connections.router)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

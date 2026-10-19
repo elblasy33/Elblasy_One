@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     allow_private_odoo_hosts: bool = False
     # Plain HTTP to Odoo is refused in production regardless of other settings.
     allow_insecure_odoo_http: bool = False
+    jwt_secret: str = ""  # >= 32 chars; required outside tests
+    session_ttl_minutes: int = 60 * 8
+    cookie_secure: bool = True
+    allow_bootstrap: bool = True  # lets the first owner create a tenant; disable after onboarding
     cors_origins: list[str] = []
 
     @property
