@@ -117,6 +117,7 @@ class SetupPlan(Base):
     # draft | approved | superseded | executing | completed | failed | needs_review
     status: Mapped[str] = mapped_column(String(16), default="draft")
     approvals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    execution: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
     updated_at: Mapped[datetime] = mapped_column(

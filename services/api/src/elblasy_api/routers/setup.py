@@ -17,6 +17,7 @@ from elblasy_api.odoo.client import OdooError
 from elblasy_api.routers.connections import _apply_manifest, _client, _owned
 from elblasy_api.security.rbac import P_CONFIG, Role
 from elblasy_api.security.vault import SecretVault
+from elblasy_api.setup.executor import DriftError, execute_plan
 from elblasy_api.setup.planner import build_plan
 from elblasy_api.setup.profile import BusinessProfile, build_profile, visible_questions
 from elblasy_api.setup.templates import TEMPLATES
@@ -227,3 +228,46 @@ def approve_plan(
                  after={"role": role, "status": p.status, "plan_hash": p.plan_hash})  # fmt: skip
     db.commit()
     return _plan_out(p)
+
+
+@router.post("/connections/{cid}/setup/plans/{pid}/execute")
+def execute(
+    cid: uuid.UUID,
+    pid: uuid.UUID,
+    request: Request,
+    user: User = Depends(require(P_CONFIG)),
+    db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings),
+    vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:
+    """Applies an approved plan, then verifies it from a fresh read of Odoo.
+    Safe to call again after a failure or timeout: finished steps are skipped and the rest are
+    idempotent. Synchronous for now (module installs can take ~1 minute)."""
+    p = _get_plan(db, user, cid, pid)
+    if p.status not in ("approved", "failed", "needs_review"):
+        raise api_error(409, "plan_not_approved", f"Plan is {p.status}; approve it first")
+    approved = {a["role"] for a in p.approvals if a["plan_hash"] == p.plan_hash}
+    if not set(p.plan["required_approvals"]) <= approved:
+        raise api_error(409, "approvals_missing", "Not every required role has approved this plan")
+    c: OdooConnection = _owned(db, user, cid)
+    if c.status != "active" or c.secret_ciphertext is None:
+        raise api_error(409, "connection_revoked", "Connection is revoked")
+    client = _client(c.base_url, c.db_name, c.login, vault.decrypt(c.secret_ciphertext), s)
+    audit.record(db, request, action="setup.execute.start", outcome="success", actor=user,
+                 target_type="setup_plan", target_id=p.id, after={"hash": p.plan_hash})  # fmt: skip
+    db.commit()
+    try:
+        result = execute_plan(db, p, user.id, client)
+    except DriftError as exc:
+        raise api_error(409, "plan_drift", str(exc)) from exc
+    except OdooError as exc:
+        p.status = "needs_review"
+        db.commit()
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+    audit.record(db, request, action="setup.execute.finish",
+                 outcome="success" if result["status"] == "completed" else "failure", actor=user,
+                 target_type="setup_plan", target_id=p.id,
+                 after={"status": result["status"],
+                        "steps": {k: v["status"] for k, v in result["steps"].items()}})  # fmt: skip
+    db.commit()
+    return {"id": str(p.id), **result}

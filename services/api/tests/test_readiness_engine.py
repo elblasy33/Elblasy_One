@@ -38,6 +38,7 @@ SNAP = {
         "installed": True,
         "configs": [{"id": 1, "name": "Main", "payment_methods": 2, "has_cash_method": True, "has_journal": True}],
         "open_sessions": 0,
+        "payment_methods": [],
     },
     "footprint": {"posted_moves": 0, "sale_orders": 0, "pos_orders": 0, "done_stock_moves": 0, "products": 0,
                   "non_standard_module_count": 0},

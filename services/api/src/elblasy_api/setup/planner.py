@@ -24,8 +24,10 @@ from elblasy_api.setup.templates import (
 PLANNER_VERSION = "1.0"
 EXECUTABLE_KINDS = frozenset(
     {"install_module", "enable_feature", "ensure_journal", "ensure_pos_payment_method",
-     "ensure_pos_config", "load_chart_of_accounts"}
+     "ensure_pos_config"}
 )  # fmt: skip
+# Deliberately NOT executable: loading a chart of accounts is financial and irreversible; the
+# plan lists it and the owner/accountant does it deliberately. Revisit once live-tested.
 
 
 @dataclass
@@ -43,6 +45,7 @@ class Step:
     impact: str = ""
     recovery: str = ""
     blocked_reason: str | None = None
+    executable: bool = True
     existing: dict[str, Any] = field(default_factory=dict)
 
 
@@ -113,7 +116,7 @@ def build_plan(
         s = Step("chart_of_accounts", "load_chart_of_accounts",
                  _t("تحميل دليل الحسابات", "Load chart of accounts"),
                  {"country": snapshot.get("company", {}).get("country")}, "to_apply", True,
-                 approval=["owner", "accountant"], risk="high",
+                 approval=["owner", "accountant"], risk="high", executable=False,
                  impact="Creates the accounts, taxes and journals of the country's standard chart.",
                  recovery="Not reversible once entries are posted. Restore from backup if wrong.")  # fmt: skip
         if posted:
