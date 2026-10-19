@@ -137,3 +137,18 @@ class BarcodeSequence(Base):
     )
     kind: Mapped[str] = mapped_column(String(16), primary_key=True)  # scale | internal
     next_value: Mapped[int] = mapped_column(BigInteger, default=1)
+
+
+class ExpenseCategory(Base):
+    """A friendly expense category mapped to one Odoo *operating-expense* account."""
+
+    __tablename__ = "expense_categories"
+    __table_args__ = (UniqueConstraint("connection_id", "account_id"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
+    connection_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("odoo_connections.id"), index=True)
+    account_id: Mapped[int] = mapped_column(BigInteger)
+    account_label: Mapped[str] = mapped_column(String(200))  # Odoo's name, for display only
+    label: Mapped[str] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)

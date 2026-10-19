@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useLang } from "@/lib/i18n";
-import { useConnections, useDaySummary, useHealth, useLowStockCount, useMe, usePlans, useReadiness } from "@/lib/queries";
+import { useConnections, useDaySummary, useHealth, useLowStockCount, useMe, useMoneyOverview, usePlans, useReadiness } from "@/lib/queries";
 import { money } from "@/components/receipt";
 
 function Kpi({ icon, label, value, note }: { icon: ReactNode; label: string; value?: string | undefined; note?: string | undefined }) {
@@ -33,6 +33,7 @@ export default function TodayPage() {
   const plans = usePlans(conn?.id);
   const canReport = !!me.data?.permissions.includes("reports.view");
   const day = useDaySummary(conn?.id, canReport && !!conn);
+  const moneyOv = useMoneyOverview(canReport && conn ? conn.id : undefined);
   const lowCount = useLowStockCount(conn?.id, !!conn && !!me.data?.permissions.some((p) => p === "inventory.adjust" || p === "purchasing.view"));
   const latest = plans.data?.find((p) => p.status !== "superseded");
   const Arrow = dir === "rtl" ? ArrowLeft : ArrowRight;
@@ -101,10 +102,10 @@ export default function TodayPage() {
       )}
 
       <section className="grid gap-4 sm:grid-cols-2" aria-label="KPIs">
-        <Kpi icon={<BadgeDollarSign className="size-6" aria-hidden />} label={t("kpi_sales_net")} value={day.data ? `${money(day.data.net_sales)} ${day.data.currency}` : undefined} note={day.data ? `${day.data.orders} ${t("kpi_orders")} · ${t("kpi_def")}: ${day.data.definition.net_sales}` : undefined} />
-        <Kpi icon={<Wallet className="size-6" aria-hidden />} label={t("kpi_cash_net")} value={day.data ? `${money(day.data.cash_collected)} ${day.data.currency}` : undefined} note={day.data ? `${t("kpi_def")}: ${day.data.definition.cash_collected}` : undefined} />
+        <Kpi icon={<BadgeDollarSign className="size-6" aria-hidden />} label={t("kpi_sales_net")} value={day.data ? `${money(day.data.net_sales)} ${day.data.currency}` : undefined} note={day.data ? `${day.data.orders} ${t("kpi_orders")} · ${t("kpi_def")}: ${t("kpi_net_def")}` : undefined} />
+        <Kpi icon={<Wallet className="size-6" aria-hidden />} label={t("kpi_cash_net")} value={day.data ? `${money(day.data.cash_collected)} ${day.data.currency}` : undefined} note={day.data ? `${t("kpi_def")}: ${t("kpi_cash_def")}` : undefined} />
         <Kpi icon={<PackageMinus className="size-6" aria-hidden />} label={t("kpi_stock")} value={lowCount.data ? String(lowCount.data.total) : undefined} note={lowCount.data ? t("st_min_hint") : undefined} />
-        <Kpi icon={<HandCoins className="size-6" aria-hidden />} label={t("kpi_payables")} />
+        <Kpi icon={<HandCoins className="size-6" aria-hidden />} label={t("kpi_payables")} value={moneyOv.data ? `${money(moneyOv.data.payables.total)} ${moneyOv.data.currency}` : undefined} note={moneyOv.data ? t("mn_payables_def") : undefined} />
       </section>
     </div>
   );

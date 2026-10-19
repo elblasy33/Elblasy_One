@@ -72,3 +72,15 @@ export const useLowStockCount = (cid?: string, enabled = true) =>
 
 export const useActiveConnection = () =>
   useQuery({ queryKey: ["connection-current"], queryFn: () => api<{ id: string; name: string; odoo_series: string | null; capabilities: Record<string, boolean> | null }>("/connections/current"), retry: false, staleTime: 60_000 });
+
+import type { ExpenseCategory, ExpenseRow, LedgerRow, MoneyOverview, PendingExpense } from "./types";
+export const useMoneyOverview = (cid?: string) =>
+  useQuery({ queryKey: ["money-overview", cid], queryFn: () => api<MoneyOverview>(`/connections/${cid}/money/overview`), enabled: !!cid, staleTime: 15_000 });
+export const useLedger = (cid: string | undefined, kind: "cash" | "bank") =>
+  useQuery({ queryKey: ["money-ledger", cid, kind], queryFn: () => api<{ items: LedgerRow[] }>(`/connections/${cid}/money/ledger?kind=${kind}&limit=15`), enabled: !!cid });
+export const useExpenseCategories = (cid?: string) =>
+  useQuery({ queryKey: ["expense-categories", cid], queryFn: () => api<{ items: ExpenseCategory[] }>(`/connections/${cid}/money/categories`), enabled: !!cid });
+export const useExpenses = (cid: string | undefined, offset: number) =>
+  useQuery({ queryKey: ["expenses", cid, offset], queryFn: () => api<{ total: number; items: ExpenseRow[] }>(`/connections/${cid}/money/expenses?limit=20&offset=${offset}`), enabled: !!cid, placeholderData: (p) => p });
+export const usePendingExpenses = (cid?: string, enabled = true) =>
+  useQuery({ queryKey: ["expense-requests", cid], queryFn: () => api<{ items: PendingExpense[] }>(`/connections/${cid}/money/expense-requests`), enabled: !!cid && enabled, refetchInterval: 20_000 });

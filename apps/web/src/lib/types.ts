@@ -108,3 +108,14 @@ export interface StockRow {
 export interface Suggestion { product_id: number; name: string; forecast: number; on_hand: number; incoming: number; min: number; max: number; suggested_qty: number }
 export interface PendingAdjustment { id: string; status: string; requested_by: string; created_at: string; reason?: string; note?: string; lines: number; value_change?: number }
 export interface CountPreview { lines: { product_id: number; name: string; current: number; counted: number; diff: number; value_change: number }[]; value_change: number }
+
+export interface ExpenseCategory { id: string; label: string; account_id: number; account: string }
+export interface ExpenseRow { id: number; name?: string; state: string; date?: string; partner: string; ref?: string; description?: string; account?: string; amount_total: number; amount_residual: number; payment_state: string; managed: boolean }
+export interface ExpenseSummary { from: string; to: string; count: number; incurred: number; paid: number; still_owed: number; by_category: Record<string, number>; currency: string; definition: string }
+export interface MoneyOverview {
+  currency: string; accounts: { journal_id: number; name: string; type: "cash" | "bank"; balance: number }[];
+  payables: { total: number; top: { name: string; owed: number }[] }; definition: Record<string, string>;
+  expenses_month: ExpenseSummary; net_profit: { available: boolean; reason: string };
+}
+export interface LedgerRow { id: number; date: string; name: string; label?: string; partner?: string; amount: number; journal: string }
+export interface PendingExpense { id: string; requested_by: string; created_at: string; amount?: number; description?: string; paid_now: boolean }

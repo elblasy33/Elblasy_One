@@ -8,6 +8,13 @@ Web / Desktop -> FastAPI (services/api) -> elblasy_one_bridge (Odoo addon) -> Od
 ```
 The browser never talks to Odoo; Odoo credentials live only encrypted in the platform DB.
 
+## What is built (all verified against real Odoo Community 18 and 19)
+Connection management and readiness scan; guided setup wizard with approved, verified execution; product catalogue (weighed items with
+scale barcodes, variants, recipes, validated import); sales on Odoo POS (sessions, quotes, idempotent checkout, refunds, cash closing);
+purchasing (suppliers, orders, partial receipts, bills, supplier payments); stock (levels, minimums, suggestions, counts with approval,
+opening balances); expenses and the money overview. Docs per area: `docs/SETUP_WIZARD.md`, `CATALOG.md`, `SALES.md`, `PURCHASING.md`,
+`STOCK.md`, `MONEY.md`, `READINESS.md`. Every money- or stock-moving call is tracked, idempotent and verified by a fresh read of Odoo.
+
 ## Run locally (API)
 ```bash
 docker compose -f infrastructure/docker/compose.platform.yml up -d          # platform Postgres :5433
