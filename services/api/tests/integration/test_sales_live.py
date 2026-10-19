@@ -472,3 +472,34 @@ def test_register_search_finds_variants_by_name_barcode_and_attribute(shop):
     q, sale = sell(client, cid, cfg, cash, one["product_id"], qty=1, pay=1000)
     assert sale.status_code == 201 and on_hand(url, db, one["product_id"]) == 4.0
     assert search("لا يوجد") == []
+
+
+def test_partial_refund_by_line_quantity_until_nothing_is_left(shop):
+    client, cid, url, db, cfg, cash = shop
+    pid, _ = product(client, cid, url, db)
+    open_register(client, cid, cfg)
+    q, sale = sell(client, cid, cfg, cash, pid, qty=4, pay=400)
+    order = sale.json()["order"]
+    line = order["lines"][0]
+    unit = order["amount_total"] / 4
+    url_ = f"/connections/{cid}/sales/orders/{order['id']}/refund"
+
+    def go(qty):
+        body = {"payment_method_id": cash, "lines": [{"line_id": line["id"], "qty": qty}]}
+        return client.post(url_, json=body, headers=idem())
+
+    first = go(1)
+    assert first.status_code == 201, first.text
+    assert abs(first.json()["order"]["amount_total"] + unit) < 0.01
+    assert on_hand(url, db, pid) == 97.0  # 100 - 4 sold + 1 back
+    too_many = go(4)  # only 3 left to give back
+    assert too_many.status_code == 422 and "more than was sold" in too_many.json()["error"]["message"]
+    rest = client.post(url_, json={"payment_method_id": cash}, headers=idem())  # everything left
+    assert rest.status_code == 201, rest.text
+    assert abs(rest.json()["order"]["amount_total"] + 3 * unit) < 0.01
+    assert on_hand(url, db, pid) == 100.0
+    done = client.post(url_, json={"payment_method_id": cash}, headers=idem())
+    assert done.status_code == 422 and "already refunded" in done.json()["error"]["message"]
+    view = client.get(f"/connections/{cid}/sales/orders", params={"session_id": order["session_id"]}).json()
+    original = next(o for o in view["items"] if o["id"] == order["id"])
+    assert original["lines"][0]["refunded_qty"] == 4

@@ -72,7 +72,7 @@ export interface SalesState { configs: PosConfig[]; currency: string; currency_d
 export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean }
 export interface QuoteLine { product_id: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
 export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string }
-export interface OrderLine { name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
+export interface OrderLine { id?: number; refunded_qty?: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
 export interface OrderView {
   id: number; name: string; state: string; date_order: string; amount_total: number; amount_tax: number;
   amount_paid: number; amount_return: number; lines: OrderLine[]; payments: { method: string; amount: number; is_change: boolean }[];

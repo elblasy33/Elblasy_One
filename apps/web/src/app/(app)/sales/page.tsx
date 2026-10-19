@@ -389,12 +389,14 @@ function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: s
   const orders = useSessionOrders(cid, sessionId);
   const keyFor = useIdempotencyKey();
   const [target, setTarget] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Record<number, number>>({});
   const m = useMutation({
     mutationFn: (id: number) => {
-      const payload = { payment_method_id: cashId };
+      const lines = Object.entries(picked).filter(([, q]) => q > 0).map(([line_id, qty]) => ({ line_id: Number(line_id), qty }));
+      const payload = { payment_method_id: cashId, lines };
       return api(`/connections/${cid}/sales/orders/${id}/refund`, { body: payload, headers: { "Idempotency-Key": keyFor({ id, ...payload }) } });
     },
-    onSuccess: () => { setTarget(null); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); },
+    onSuccess: () => { setTarget(null); setPicked({}); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); },
   });
   const e = errMsg(t, m.error);
   if (orders.isLoading) return <Spinner label={t("loading")} />;
@@ -409,14 +411,35 @@ function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: s
             <div><p className="font-bold" dir="ltr">{o.name}</p><p className="text-xs text-soft" dir="ltr">{o.date_order} · {o.lines.length} {t("hist_items")}</p></div>
             <div className="flex items-center gap-3">
               <span className={cn("text-lg font-black", o.amount_total < 0 && "text-bad")} dir="ltr">{money(o.amount_total, dec)} {currency}</span>
-              {o.amount_total < 0 ? <Badge tone="warn">{t("refunded")}</Badge> : canRefund && cashId && (
-                target === o.id ? (
-                  <span className="flex items-center gap-2"><span className="text-xs text-soft">{t("refund_confirm")} · {t("refund_method_note")}</span>
-                    <Button variant="danger" loading={m.isPending} onClick={() => m.mutate(o.id)} className="min-h-10 px-3">{t("refund")}</Button>
-                    <button onClick={() => setTarget(null)} className="text-sm font-bold text-soft">{t("cancel")}</button></span>
-                ) : <button onClick={() => setTarget(o.id)} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm font-bold hover:bg-surface2"><Undo2 className="size-4" aria-hidden />{t("refund")}</button>
+              {o.amount_total < 0 ? <Badge tone="warn">{t("refunded")}</Badge> : canRefund && cashId && !o.lines.every((l) => (l.refunded_qty ?? 0) >= l.qty) && (
+                target !== o.id && <button onClick={() => { setTarget(o.id); setPicked({}); }} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm font-bold hover:bg-surface2"><Undo2 className="size-4" aria-hidden />{t("refund")}</button>
               )}
             </div>
+            {target === o.id && (
+              <div className="w-full space-y-2 border-t border-line pt-3">
+                <p className="text-sm font-bold">{t("refund_pick")}</p>
+                {o.lines.filter((l) => l.id && l.qty > 0).map((l) => {
+                  const left = l.qty - (l.refunded_qty ?? 0);
+                  if (left <= 0) return null;
+                  const v = picked[l.id as number] ?? 0;
+                  return (
+                    <div key={l.id} className="flex items-center justify-between gap-2">
+                      <span dir="auto">{l.name} <span className="text-xs text-soft">({t("refund_left")}: {left})</span></span>
+                      <span className="flex items-center gap-1">
+                        <button aria-label="-" onClick={() => setPicked({ ...picked, [l.id as number]: Math.max(0, v - 1) })} className="size-10 rounded-xl border border-line font-black">−</button>
+                        <span className="w-10 text-center font-black" dir="ltr">{v}</span>
+                        <button aria-label="+" onClick={() => setPicked({ ...picked, [l.id as number]: Math.min(left, v + 1) })} className="size-10 rounded-xl border border-line font-black">+</button>
+                      </span>
+                    </div>
+                  );
+                })}
+                <p className="text-xs text-soft">{t("refund_method_note")} {Object.values(picked).every((q) => !q) ? t("refund_all_note") : ""}</p>
+                <div className="flex gap-2">
+                  <Button variant="danger" loading={m.isPending} onClick={() => m.mutate(o.id)} className="min-h-10 px-3">{t("refund")}</Button>
+                  <button onClick={() => { setTarget(null); setPicked({}); }} className="text-sm font-bold text-soft">{t("cancel")}</button>
+                </div>
+              </div>
+            )}
           </Card></li>
         ))}
       </ul>

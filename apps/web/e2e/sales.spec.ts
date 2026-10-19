@@ -97,7 +97,7 @@ test("cashier day: open register, scan, pay with change, refund, close with a ca
   await page.getByRole("tab", { name: "المبيعات" }).click();
   await expect(page.getByText("مبيعات الوردية")).toBeVisible();
   await page.getByRole("button", { name: "مرتجع" }).last().click(); // oldest sale is last in the list
-  await page.locator("li", { hasText: "استرجاع كامل لهذا البيع" }).getByRole("button", { name: "مرتجع" }).click(); // confirm inside that row
+  await page.locator("li", { hasText: "اختر الكمية المراد إرجاعها" }).getByRole("button", { name: "مرتجع" }).click(); // no quantity chosen = everything left
   await expect(page.getByText("تم الاسترجاع")).toBeVisible();
   expect(await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] })).toEqual([{ id: pid, qty_available: 19 }]); // refund put 2 back, 1 sold
   await page.screenshot({ path: "e2e/shots/24-history.png", fullPage: true });

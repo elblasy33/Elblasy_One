@@ -73,8 +73,14 @@ class CloseSessionIn(BaseModel):
     counted_cash: float = Field(ge=0, le=1e9)
 
 
+class RefundLineIn(BaseModel):
+    line_id: int = Field(gt=0)
+    qty: float = Field(gt=0, le=1_000_000)
+
+
 class RefundIn(BaseModel):
     payment_method_id: int = Field(gt=0)
+    lines: list[RefundLineIn] = Field(default_factory=list, max_length=200)  # empty = everything left
 
 
 def _conn(
@@ -317,7 +323,7 @@ def refund(
     operations.succeed(db, op, out, {"verified": True, "method": "sales_get_order readback"})
     audit.record(db, request, action="sales.order.refund", outcome="success", actor=user,
                  target_type="pos_order", target_id=order["id"],
-                 before={"refunded_order": order_id}, after={"total": order["amount_total"]})  # fmt: skip
+                 before={"refunded_order": order_id}, after={"total": order["amount_total"], "partial": bool(body.lines)})  # fmt: skip
     db.commit()
     return out
 

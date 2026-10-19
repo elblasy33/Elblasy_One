@@ -10,7 +10,10 @@ Principles
   (`amount_return`) as a negative number, Odoo 18 as a positive one.
 - Nothing here edits posted accounting: closing a session is Odoo's own validated flow."""
 
+import datetime
 import re
+
+import pytz
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
@@ -112,6 +115,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "product_id": l.product_id.id,
                     "name": l.full_product_name or l.product_id.display_name,
                     "qty": l.qty,
+                    "refunded_qty": -sum(l.refund_orderline_ids.mapped("qty")) if l.qty > 0 else 0,
                     "price_unit": l.price_unit,
                     "discount": l.discount,
                     "subtotal": l.price_subtotal,
@@ -309,12 +313,12 @@ class ElblasyBridgeSales(models.AbstractModel):
         self._require_internal_user()
         self._need_pos()
         d = fields.Date.from_string(day) if day else fields.Date.context_today(self)
-        start = fields.Datetime.to_string(
-            fields.Datetime.context_timestamp(self, fields.Datetime.from_string(f"{d} 00:00:00")).astimezone(__import__("datetime").timezone.utc).replace(tzinfo=None)
-        )
-        end = fields.Datetime.to_string(
-            fields.Datetime.from_string(start) + __import__("datetime").timedelta(days=1)
-        )
+        # the day runs from local midnight to local midnight (user's timezone); Odoo stores UTC
+        tz = pytz.timezone(self.env.user.tz or "UTC")
+        local_start = tz.localize(datetime.datetime.combine(d, datetime.time.min))
+        local_end = tz.localize(datetime.datetime.combine(d + datetime.timedelta(days=1), datetime.time.min))
+        start = fields.Datetime.to_string(local_start.astimezone(pytz.utc).replace(tzinfo=None))
+        end = fields.Datetime.to_string(local_end.astimezone(pytz.utc).replace(tzinfo=None))
         orders = self.env["pos.order"].search(
             [("state", "in", ("paid", "done", "invoiced")), ("date_order", ">=", start), ("date_order", "<", end)]
         )
@@ -472,7 +476,7 @@ class ElblasyBridgeSales(models.AbstractModel):
 
     @api.model
     def sales_refund(self, op_id, key, spec):
-        """Full refund of one paid order, paid back through the given method."""
+        """Refund of a paid order (whole, or chosen lines/quantities), paid back through the given method."""
         self._require_internal_user()
         self._need_pos()
         if not isinstance(key, str) or not KEY_RE.match(key):
@@ -483,8 +487,20 @@ class ElblasyBridgeSales(models.AbstractModel):
         orig = self.env["pos.order"].browse(int(spec.get("order_id") or 0)).exists()
         if not orig or orig.state not in ("paid", "done", "invoiced") or orig.amount_total <= 0:
             raise UserError("Only a paid sale can be refunded.")
-        if orig.lines.mapped("refund_orderline_ids"):  # computed field `refunded_order_id` is not searchable
+        remaining = {l.id: l.qty + sum(l.refund_orderline_ids.mapped("qty")) for l in orig.lines}
+        if all(r <= 1e-9 for r in remaining.values()):
             raise UserError("This sale was already refunded.")
+        wanted = {}
+        for item in spec.get("lines") or []:
+            lid, q = int(item.get("line_id") or 0), float(item.get("qty") or 0)
+            if lid not in remaining or q <= 0:
+                raise UserError("Invalid refund line.")
+            wanted[lid] = wanted.get(lid, 0.0) + q
+        if not wanted:  # no lines named: everything still refundable
+            wanted = {lid: r for lid, r in remaining.items() if r > 1e-9}
+        for lid, q in wanted.items():
+            if q > remaining[lid] + 1e-9:
+                raise UserError("Cannot refund more than was sold.")
         if orig.account_move:
             raise UserError(
                 "This sale has an invoice (a credit sale). Refunding it needs a credit note in Odoo; it cannot be refunded here."
@@ -500,7 +516,11 @@ class ElblasyBridgeSales(models.AbstractModel):
         # the accounting exactly as for any POS order (the backend `refund()` shortcut does not).
         now = fields.Datetime.now()
         refund_uuid = f"{key[:24]}ffffffff"
-        total = orig.amount_total
+        cur = orig.currency_id
+        picked = [(l, wanted[l.id]) for l in orig.lines if l.id in wanted]
+        ratio = lambda l, q: q / l.qty  # noqa: E731
+        total = cur.round(sum(l.price_subtotal_incl * ratio(l, q) for l, q in picked))
+        tax = cur.round(sum((l.price_subtotal_incl - l.price_subtotal) * ratio(l, q) for l, q in picked))
         order = {
             "uuid": refund_uuid,
             "name": f"Elblasy refund {key[:8]}",
@@ -512,7 +532,7 @@ class ElblasyBridgeSales(models.AbstractModel):
             "date_order": now,
             "amount_paid": -total,
             "amount_total": -total,
-            "amount_tax": -orig.amount_tax,
+            "amount_tax": -tax,
             "amount_return": 0.0,
             "partner_id": orig.partner_id.id or False,
             "to_invoice": False,
@@ -521,16 +541,16 @@ class ElblasyBridgeSales(models.AbstractModel):
                 [0, 0, {
                     "uuid": f"{key[:24]}{i:08x}",
                     "product_id": l.product_id.id,
-                    "qty": -l.qty,
+                    "qty": -q,
                     "price_unit": l.price_unit,
                     "discount": l.discount,
-                    "price_subtotal": -l.price_subtotal,
-                    "price_subtotal_incl": -l.price_subtotal_incl,
+                    "price_subtotal": -cur.round(l.price_subtotal * ratio(l, q)),
+                    "price_subtotal_incl": -cur.round(l.price_subtotal_incl * ratio(l, q)),
                     "tax_ids": [[6, 0, l.tax_ids.ids]],
                     "full_product_name": l.full_product_name or l.product_id.display_name,
                     "refunded_orderline_id": l.id,
                 }]
-                for i, l in enumerate(orig.lines)
+                for i, (l, q) in enumerate(picked)
             ],
             "payment_ids": [[0, 0, {"payment_method_id": pm.id, "amount": -total, "payment_date": now}]],
         }
