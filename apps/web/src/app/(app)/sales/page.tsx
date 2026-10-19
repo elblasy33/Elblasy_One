@@ -12,7 +12,7 @@ import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
-import type { CloseResult, Customer, PosConfig, Quote, SaleProduct, SaleResult, SalesState } from "@/lib/types";
+import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
 interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number }
 type Tab = "register" | "history";
@@ -383,6 +383,36 @@ function CloseSummary({ r, currency, onDone }: { r: CloseResult; currency: strin
   );
 }
 
+function RefundRequests({ cid, canDecide }: { cid: string; canDecide: boolean }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const list = useQuery({ queryKey: ["refund-requests", cid], queryFn: () => api<{ items: RefundRequest[] }>(`/connections/${cid}/sales/refund-requests`), refetchInterval: 15_000 });
+  const act = useMutation({
+    mutationFn: ({ id, ok }: { id: string; ok: boolean }) => api(`/connections/${cid}/sales/refund-requests/${id}/${ok ? "approve" : "reject"}`, { method: "POST", body: ok ? undefined : { note: "" } }),
+    onSettled: () => { void qc.invalidateQueries({ queryKey: ["refund-requests", cid] }); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["alerts"] }); },
+  });
+  const e = errMsg(t, act.error);
+  const items = (list.data?.items ?? []).filter((r) => r.status === "awaiting_approval" || !canDecide);
+  if (!items.length) return null;
+  return (
+    <Card className="space-y-2">
+      <h2 className="text-lg font-black">{t("rr_title")}</h2>
+      {e && <ErrorBox message={e.text} reference={e.ref} />}
+      <ul className="divide-y divide-line">
+        {items.map((r) => (
+          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+            <div><p className="font-bold" dir="ltr">{r.order} · {money(r.amount ?? 0)}{r.partial ? ` · ${t("rr_partial")}` : ""}</p><p className="text-xs text-soft" dir="auto">{r.requested_by}</p></div>
+            {canDecide && r.status === "awaiting_approval" ? (
+              <div className="flex gap-2"><Button className="min-h-10 px-3" loading={act.isPending} onClick={() => act.mutate({ id: r.id, ok: true })}>{t("rr_approve")}</Button>
+                <Button variant="ghost" className="min-h-10 px-3" onClick={() => act.mutate({ id: r.id, ok: false })}>{t("rr_reject")}</Button></div>
+            ) : <Badge tone={r.status === "succeeded" ? "ok" : r.status === "rejected" ? "bad" : "warn"}>{t(r.status === "succeeded" ? "rr_done" : r.status === "rejected" ? "rr_rejected" : "rr_waiting")}</Badge>}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: string; sessionId: number; cashId?: number | undefined; currency: string; dec: number; canRefund: boolean }) {
   const { t } = useLang();
   const qc = useQueryClient();
@@ -394,15 +424,18 @@ function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: s
     mutationFn: (id: number) => {
       const lines = Object.entries(picked).filter(([, q]) => q > 0).map(([line_id, qty]) => ({ line_id: Number(line_id), qty }));
       const payload = { payment_method_id: cashId, lines };
-      return api(`/connections/${cid}/sales/orders/${id}/refund`, { body: payload, headers: { "Idempotency-Key": keyFor({ id, ...payload }) } });
+      return api(`/connections/${cid}/sales/orders/${id}/${canRefund ? "refund" : "refund-request"}`, { body: payload, headers: { "Idempotency-Key": keyFor({ id, ...payload }) } });
     },
-    onSuccess: () => { setTarget(null); setPicked({}); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); },
+    onSuccess: () => { setTarget(null); setPicked({}); setSent(!canRefund); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["refund-requests", cid] }); },
   });
+  const [sent, setSent] = useState(false);
   const e = errMsg(t, m.error);
   if (orders.isLoading) return <Spinner label={t("loading")} />;
   if (!orders.data?.items.length) return <Card className="py-10 text-center text-soft">{t("hist_none")}</Card>;
   return (
     <div className="space-y-3">
+      <RefundRequests cid={cid} canDecide={canRefund} />
+      {sent && <div role="status"><Card className="border-ok/30 bg-oksoft font-bold text-ok">{t("rr_sent")}</Card></div>}
       <h2 className="text-lg font-black">{t("hist_title")}</h2>
       {e && <ErrorBox message={e.text} reference={e.ref} />}
       <ul className="space-y-2">
@@ -411,8 +444,8 @@ function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: s
             <div><p className="font-bold" dir="ltr">{o.name}</p><p className="text-xs text-soft" dir="ltr">{o.date_order} · {o.lines.length} {t("hist_items")}</p></div>
             <div className="flex items-center gap-3">
               <span className={cn("text-lg font-black", o.amount_total < 0 && "text-bad")} dir="ltr">{money(o.amount_total, dec)} {currency}</span>
-              {o.amount_total < 0 ? <Badge tone="warn">{t("refunded")}</Badge> : canRefund && cashId && !o.lines.every((l) => (l.refunded_qty ?? 0) >= l.qty) && (
-                target !== o.id && <button onClick={() => { setTarget(o.id); setPicked({}); }} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm font-bold hover:bg-surface2"><Undo2 className="size-4" aria-hidden />{t("refund")}</button>
+              {o.amount_total < 0 ? <Badge tone="warn">{t("refunded")}</Badge> : cashId && !o.lines.every((l) => (l.refunded_qty ?? 0) >= l.qty) && (
+                target !== o.id && <button onClick={() => { setTarget(o.id); setPicked({}); }} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm font-bold hover:bg-surface2"><Undo2 className="size-4" aria-hidden />{t(canRefund ? "refund" : "rr_ask")}</button>
               )}
             </div>
             {target === o.id && (
@@ -435,7 +468,7 @@ function History_({ cid, sessionId, cashId, currency, dec, canRefund }: { cid: s
                 })}
                 <p className="text-xs text-soft">{t("refund_method_note")} {Object.values(picked).every((q) => !q) ? t("refund_all_note") : ""}</p>
                 <div className="flex gap-2">
-                  <Button variant="danger" loading={m.isPending} onClick={() => m.mutate(o.id)} className="min-h-10 px-3">{t("refund")}</Button>
+                  <Button variant="danger" loading={m.isPending} onClick={() => m.mutate(o.id)} className="min-h-10 px-3">{t(canRefund ? "refund" : "rr_ask")}</Button>
                   <button onClick={() => { setTarget(null); setPicked({}); }} className="text-sm font-bold text-soft">{t("cancel")}</button>
                 </div>
               </div>

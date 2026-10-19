@@ -102,6 +102,30 @@ test("cashier day: open register, scan, pay with change, refund, close with a ca
   expect(await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] })).toEqual([{ id: pid, qty_available: 19 }]); // refund put 2 back, 1 sold
   await page.screenshot({ path: "e2e/shots/24-history.png", fullPage: true });
 
+  // ---- a cashier cannot refund, but can ask; the owner approves from the same screen
+  const askEmail = `ask-${Date.now()}@example.com`;
+  expect((await page.request.post("/api/users", { data: { email: askEmail, password: "cashier-password-1", role: "cashier" } })).status()).toBe(201);
+  const ctx = await page.context().browser()!.newContext();
+  const cp = await ctx.newPage();
+  await cp.goto("/login");
+  await cp.getByLabel("البريد الإلكتروني").fill(askEmail);
+  await cp.getByLabel("كلمة المرور").fill("cashier-password-1");
+  await cp.getByRole("button", { name: "تسجيل الدخول" }).click();
+  await expect(cp).toHaveURL(/\/today/);
+  await cp.goto("/sales");
+  await cp.getByRole("tab", { name: "المبيعات" }).click();
+  await expect(cp.getByRole("button", { name: "مرتجع", exact: true })).toHaveCount(0);
+  await cp.getByRole("button", { name: "اطلب مرتجع" }).click();
+  await cp.locator("li", { hasText: "اختر الكمية المراد إرجاعها" }).getByRole("button", { name: "اطلب مرتجع" }).click();
+  await expect(cp.getByText("أُرسل الطلب إلى المسؤول للموافقة")).toBeVisible();
+  await ctx.close();
+  await page.goto("/sales");
+  await page.getByRole("tab", { name: "المبيعات" }).click();
+  await expect(page.getByRole("heading", { name: "طلبات المرتجع" })).toBeVisible();
+  await page.getByRole("button", { name: "وافق" }).click();
+  await expect(page.getByRole("heading", { name: "طلبات المرتجع" })).toBeHidden();
+  expect(await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] })).toEqual([{ id: pid, qty_available: 20 }]);
+
   // ---- today's numbers on the dashboard are real and defined
   await page.getByRole("link", { name: "اليوم" }).first().click();
   await expect(page.getByText("صافي مبيعات اليوم")).toBeVisible();

@@ -6,12 +6,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from elblasy_api import audit, operations
 from elblasy_api.config import Settings, get_settings
 from elblasy_api.db import get_session
-from elblasy_api.deps import api_error, get_vault, require
+from elblasy_api.deps import api_error, get_vault, require, require_any
 from elblasy_api.models import OdooConnection, Operation, User
 from elblasy_api.odoo.client import BridgeClient, OdooError, OdooRejectedError, OdooUncertainError
 from elblasy_api.routers.connections import _client, _owned
@@ -299,19 +300,16 @@ def list_orders(
     return _read(client, "sales_list_orders", session_id or 0, limit, offset)
 
 
-@router.post("/orders/{order_id}/refund", status_code=201)
-def refund(
-    cid: uuid.UUID, order_id: int, body: RefundIn, idem: IDEM, request: Request,
-    user: User = Depends(require(P_RETURNS)), db: Session = Depends(get_session),
-    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+def _apply_refund(
+    db: Session, request: Request, *, actor: User, requested_by: User, c: OdooConnection, client: BridgeClient,
+    idem: str, order_id: int, body: RefundIn, approval_ref: str | None = None,
 ) -> dict[str, Any]:  # fmt: skip
-    c, client = _conn(db, user, cid, s, vault)
     payload = {"order_id": order_id, **body.model_dump()}
-    op, replayed = operations.begin(db, tenant_id=user.tenant_id, connection_id=c.id, actor_id=user.id,
+    op, replayed = operations.begin(db, tenant_id=actor.tenant_id, connection_id=c.id, actor_id=actor.id,
                                     op_type="sales.order.refund", idem=idem, payload=payload)  # fmt: skip
     if replayed:
         return {**(op.odoo_refs or {}), "replayed": True}
-    key = operations.odoo_key(user.tenant_id, c.id, idem)
+    key = operations.odoo_key(actor.tenant_id, c.id, idem)
     try:
         res = client.call_bridge("sales_refund", str(op.id), key, payload, timeout=60)
         got = client.call_bridge("sales_get_order", res["refs"]["order"]["id"])
@@ -323,11 +321,133 @@ def refund(
         raise api_error(502, "verification_failed", "Odoo does not show the refund as requested.")
     out = {"order": order, "outcome": res["outcome"], "replayed": False}
     operations.succeed(db, op, out, {"verified": True, "method": "sales_get_order readback"})
-    audit.record(db, request, action="sales.order.refund", outcome="success", actor=user,
-                 target_type="pos_order", target_id=order["id"],
-                 before={"refunded_order": order_id}, after={"total": order["amount_total"], "partial": bool(body.lines)})  # fmt: skip
+    audit.record(db, request, action="sales.order.refund" if not approval_ref else "sales.order.refund.approved",
+                 outcome="success", actor=actor, target_type="pos_order", target_id=order["id"],
+                 before={"refunded_order": order_id},
+                 after={"total": order["amount_total"], "partial": bool(body.lines),
+                        "requested_by": requested_by.email, "approval_ref": approval_ref})  # fmt: skip
     db.commit()
     return out
+
+
+@router.post("/orders/{order_id}/refund", status_code=201)
+def refund(
+    cid: uuid.UUID, order_id: int, body: RefundIn, idem: IDEM, request: Request,
+    user: User = Depends(require(P_RETURNS)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    c, client = _conn(db, user, cid, s, vault)
+    return _apply_refund(db, request, actor=user, requested_by=user, c=c, client=client, idem=idem,
+                         order_id=order_id, body=body)  # fmt: skip
+
+
+# ---- refund requests: a cashier asks, someone with the returns permission decides ----
+REQ_TYPE = "sales.refund.request"
+
+
+class DecisionIn(BaseModel):
+    note: str = Field(default="", max_length=300)
+
+
+@router.post("/orders/{order_id}/refund-request", status_code=202)
+def request_refund(
+    cid: uuid.UUID, order_id: int, body: RefundIn, idem: IDEM, request: Request,
+    user: User = Depends(require(P_SALES)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    c, client = _conn(db, user, cid, s, vault)
+    payload = {"order_id": order_id, **body.model_dump()}
+    existing = db.scalar(select(Operation).where(Operation.tenant_id == user.tenant_id, Operation.connection_id == c.id,
+                                                 Operation.type == REQ_TYPE, Operation.idempotency_key == idem))  # fmt: skip
+    if existing:
+        if existing.request_fingerprint != operations.fingerprint(payload):
+            raise api_error(
+                409,
+                "idempotency_conflict",
+                "This Idempotency-Key was used with a different request",
+            )
+        return {"operation_id": str(existing.id), "status": existing.status, "replayed": True}
+    got = _read(client, "sales_get_order", order_id)
+    order = got.get("order") if got.get("found") else None
+    if not order or order["state"] not in PAID_STATES or order["amount_total"] <= 0:
+        raise api_error(422, "refund_rejected", "Only a paid sale can be refunded.")
+    if all(ln.get("refunded_qty", 0) >= ln["qty"] - 1e-9 for ln in order["lines"]):
+        raise api_error(422, "refund_rejected", "This sale was already refunded.")
+    op = Operation(tenant_id=user.tenant_id, connection_id=c.id, type=REQ_TYPE, idempotency_key=idem,
+                   request_fingerprint=operations.fingerprint(payload), actor_id=user.id,
+                   status="awaiting_approval", payload=payload,
+                   verification={"order": order["name"], "amount": order["amount_total"]})  # fmt: skip
+    db.add(op)
+    audit.record(db, request, action="sales.refund.requested", outcome="success", actor=user,
+                 target_type="pos_order", target_id=order_id, after={"partial": bool(body.lines)})  # fmt: skip
+    db.commit()
+    return {"operation_id": str(op.id), "status": "awaiting_approval", "replayed": False}
+
+
+@router.get("/refund-requests")
+def list_refund_requests(
+    cid: uuid.UUID, status: str | None = Query(default=None, max_length=24),
+    user: User = Depends(require_any(P_SALES, P_RETURNS)), db: Session = Depends(get_session),
+) -> dict[str, Any]:  # fmt: skip
+    _owned(db, user, cid)
+    q = (select(Operation, User.email).join(User, User.id == Operation.actor_id)
+         .where(Operation.tenant_id == user.tenant_id, Operation.connection_id == cid, Operation.type == REQ_TYPE)
+         .order_by(Operation.created_at.desc()).limit(100))  # fmt: skip
+    if not has_permission(user.role, P_RETURNS):  # a cashier sees only their own
+        q = q.where(Operation.actor_id == user.id)
+    if status:
+        q = q.where(Operation.status == status)
+    return {"items": [{"id": str(op.id), "status": op.status, "requested_by": email, "created_at": op.created_at,
+                       "order": (op.verification or {}).get("order"), "amount": (op.verification or {}).get("amount"),
+                       "order_id": (op.payload or {}).get("order_id"), "partial": bool((op.payload or {}).get("lines")),
+                       "note": op.safe_error if op.status == "rejected" else None}
+                      for op, email in db.execute(q)]}  # fmt: skip
+
+
+def _pending_request(db: Session, user: User, cid: uuid.UUID, op_id: uuid.UUID) -> Operation:
+    op = db.scalar(select(Operation).where(Operation.id == op_id, Operation.connection_id == cid,
+                                           Operation.tenant_id == user.tenant_id, Operation.type == REQ_TYPE))  # fmt: skip
+    if op is None:
+        raise api_error(404, "not_found", "Request not found")
+    if op.status != "awaiting_approval" or not op.payload:
+        raise api_error(409, "not_pending", f"This request is {op.status}")
+    return op
+
+
+@router.post("/refund-requests/{op_id}/approve")
+def approve_refund(
+    cid: uuid.UUID, op_id: uuid.UUID, request: Request,
+    user: User = Depends(require(P_RETURNS)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    c, client = _conn(db, user, cid, s, vault)
+    op = _pending_request(db, user, c.id, op_id)
+    if op.actor_id == user.id:  # segregation of duties
+        raise api_error(403, "self_approval", "You cannot approve your own request")
+    requester = db.get(User, op.actor_id)
+    assert requester is not None  # noqa: S101
+    payload = dict(op.payload or {})
+    out = _apply_refund(db, request, actor=user, requested_by=requester, c=c, client=client,
+                        idem=f"rr-{op.id.hex}", order_id=int(payload["order_id"]),
+                        body=RefundIn.model_validate({k: v for k, v in payload.items() if k != "order_id"}),
+                        approval_ref=str(op.id))  # fmt: skip
+    op.status, op.decided_by = "succeeded", user.id
+    db.commit()
+    return out
+
+
+@router.post("/refund-requests/{op_id}/reject")
+def reject_refund(
+    cid: uuid.UUID, op_id: uuid.UUID, body: DecisionIn, request: Request,
+    user: User = Depends(require(P_RETURNS)), db: Session = Depends(get_session),
+) -> dict[str, Any]:  # fmt: skip
+    _owned(db, user, cid)
+    op = _pending_request(db, user, cid, op_id)
+    op.status, op.decided_by, op.safe_error = "rejected", user.id, (body.note or "rejected")[:500]
+    audit.record(db, request, action="sales.refund.rejected", outcome="success", actor=user,
+                 target_type="pos_order", target_id=(op.payload or {}).get("order_id"), after={"note": body.note})  # fmt: skip
+    db.commit()
+    return {"id": str(op.id), "status": "rejected"}
 
 
 @router.post("/sessions/{session_id}/close")

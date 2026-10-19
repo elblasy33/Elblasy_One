@@ -145,3 +145,5 @@ export interface MoneyReport {
   gross_profit: number; net_profit: number; unclosed_sessions: number;
   cash_flow: { journal: string; type: string; opening: number; in: number; out: number; closing: number }[];
 }
+
+export interface RefundRequest { id: string; status: string; requested_by: string; created_at: string; order?: string; amount?: number; order_id?: number; partial: boolean; note?: string | null }

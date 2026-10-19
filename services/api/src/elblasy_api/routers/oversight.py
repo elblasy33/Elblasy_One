@@ -26,6 +26,7 @@ from elblasy_api.security.rbac import (
     P_EXPENSE_APPROVE,
     P_PAYMENTS,
     P_PURCHASING_VIEW,
+    P_RETURNS,
     P_SALES,
     P_STOCK_ADJUST,
     P_STOCK_APPROVE,
@@ -221,6 +222,10 @@ def alerts(
                     "stock_adjustments_waiting", "warning", n, P_STOCK_APPROVE, "/inventory/stock"
                 )
             )
+    if has_permission(user.role, P_RETURNS):
+        n = cnt(Operation.status == "awaiting_approval", Operation.type == "sales.refund.request")
+        if n:
+            out.append(_alert("refund_requests_waiting", "warning", n, P_RETURNS, "/sales"))
     if has_permission(user.role, P_EXPENSE_APPROVE):
         n = cnt(Operation.status == "awaiting_approval", Operation.type == "money.expense.create")
         if n:

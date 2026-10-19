@@ -507,3 +507,52 @@ def test_partial_refund_by_line_quantity_until_nothing_is_left(shop):
     ).json()
     original = next(o for o in view["items"] if o["id"] == order["id"])
     assert original["lines"][0]["refunded_qty"] == 4
+
+
+def test_refund_request_flow_cashier_asks_manager_decides(shop):
+    from tests.integration.test_purchasing_live import login as login_role
+
+    client, cid, url, db, cfg, cash = shop
+    pid, _ = product(client, cid, url, db)
+    open_register(client, cid, cfg)
+    cashier = login_role(client, cid, "cashier")
+    q, sale = sell(cashier, cid, cfg, cash, pid, qty=2, pay=200)
+    oid = sale.json()["order"]["id"]
+    assert on_hand(url, db, pid) == 98.0
+    base = f"/connections/{cid}/sales"
+    body = {"payment_method_id": cash}
+    h = idem()
+    req = cashier.post(f"{base}/orders/{oid}/refund-request", json=body, headers=h)
+    assert req.status_code == 202 and req.json()["status"] == "awaiting_approval", req.text
+    assert (
+        cashier.post(f"{base}/orders/{oid}/refund-request", json=body, headers=h).json()["replayed"]
+        is True
+    )
+    assert on_hand(url, db, pid) == 98.0  # nothing moved yet
+    rid = req.json()["operation_id"]
+    mine = cashier.get(f"{base}/refund-requests").json()["items"]
+    assert [m["id"] for m in mine] == [rid] and mine[0]["status"] == "awaiting_approval"
+    # a cashier can neither approve (even their own) nor see the decision endpoints as allowed
+    assert cashier.post(f"{base}/refund-requests/{rid}/approve").status_code == 403
+    # the owner decides: first reject a second request, then approve this one
+    second = cashier.post(f"{base}/orders/{oid}/refund-request", json=body, headers=idem()).json()[
+        "operation_id"
+    ]
+    rej = client.post(f"{base}/refund-requests/{second}/reject", json={"note": "لا"})
+    assert rej.status_code == 200 and rej.json()["status"] == "rejected"
+    assert client.post(f"{base}/refund-requests/{second}/approve").status_code == 409
+    ok = client.post(f"{base}/refund-requests/{rid}/approve")
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["order"]["amount_total"] < 0 and on_hand(url, db, pid) == 100.0
+    assert client.post(f"{base}/refund-requests/{rid}/approve").status_code == 409  # decided once
+    statuses = {m["id"]: m["status"] for m in client.get(f"{base}/refund-requests").json()["items"]}
+    assert statuses[rid] == "succeeded" and statuses[second] == "rejected"
+    audit = {a["action"] for a in client.get("/audit").json()["items"]}
+    assert {
+        "sales.refund.requested",
+        "sales.order.refund.approved",
+        "sales.refund.rejected",
+    } <= audit
+    # requests for something that is not a paid sale are refused up front
+    bad = cashier.post(f"{base}/orders/{oid}/refund-request", json=body, headers=idem())
+    assert bad.status_code == 422
