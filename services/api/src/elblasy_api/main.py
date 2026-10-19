@@ -1,0 +1,51 @@
+import logging
+import uuid
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+
+from elblasy_api.config import get_settings
+
+log = logging.getLogger("elblasy")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(
+        title="Elblasy One API",
+        version="0.1.0",
+        docs_url=None if settings.is_production else "/docs",
+    )
+
+    @app.middleware("http")
+    async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
+        cid = request.headers.get("x-correlation-id") or str(uuid.uuid4())
+        request.state.correlation_id = cid
+        response: Response = await call_next(request)
+        response.headers["x-correlation-id"] = cid
+        return response
+
+    @app.exception_handler(Exception)
+    async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+        cid = getattr(request.state, "correlation_id", None)
+        log.exception("unhandled error cid=%s", cid)  # stack trace stays server-side
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "Internal error",
+                    "correlation_id": cid,
+                }
+            },
+            headers={"x-correlation-id": cid or ""},
+        )
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
+
+
+app = create_app()
