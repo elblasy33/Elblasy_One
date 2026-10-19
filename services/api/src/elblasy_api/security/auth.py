@@ -22,9 +22,17 @@ def verify_password(pw: str, hashed: str | None) -> bool:
         return False
 
 
-def issue_token(secret: str, user_id: uuid.UUID, tenant_id: uuid.UUID, ttl_s: int) -> str:
+def issue_token(
+    secret: str, user_id: uuid.UUID, tenant_id: uuid.UUID, ttl_s: int, version: int = 0
+) -> str:
     now = int(time.time())
-    claims = {"sub": str(user_id), "tid": str(tenant_id), "iat": now, "exp": now + ttl_s}
+    claims = {
+        "sub": str(user_id),
+        "tid": str(tenant_id),
+        "tv": version,
+        "iat": now,
+        "exp": now + ttl_s,
+    }
     return jwt.encode(claims, secret, algorithm="HS256")
 
 

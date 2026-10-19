@@ -1,11 +1,21 @@
 import logging
-import uuid
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from elblasy_api.config import get_settings
-from elblasy_api.routers import auth, catalog, connections, money, purchasing, sales, setup, stock
+from elblasy_api.routers import (
+    auth,
+    catalog,
+    connections,
+    money,
+    oversight,
+    purchasing,
+    sales,
+    setup,
+    stock,
+)
+from elblasy_api.security.middleware import install
 
 log = logging.getLogger("elblasy")
 
@@ -18,13 +28,7 @@ def create_app() -> FastAPI:
         docs_url=None if settings.is_production else "/docs",
     )
 
-    @app.middleware("http")
-    async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
-        cid = request.headers.get("x-correlation-id") or str(uuid.uuid4())
-        request.state.correlation_id = cid
-        response: Response = await call_next(request)
-        response.headers["x-correlation-id"] = cid
-        return response
+    install(app, settings)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
@@ -46,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(purchasing.router)
     app.include_router(stock.router)
     app.include_router(money.router)
+    app.include_router(oversight.router)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

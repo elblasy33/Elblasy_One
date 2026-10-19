@@ -29,7 +29,8 @@ def pg_url():
     url = ADMIN_URL.rsplit("/", 1)[0] + "/" + name
     os.environ.update(
         ELBLASY_DATABASE_URL=url, ELBLASY_JWT_SECRET=JWT, ELBLASY_SECRET_KEYS=KEY,
-        ELBLASY_ENVIRONMENT="test", ELBLASY_COOKIE_SECURE="false",
+        ELBLASY_ENVIRONMENT="test", ELBLASY_COOKIE_SECURE="false", ELBLASY_RATE_LIMIT_WRITES_PER_MIN="0",
+        ELBLASY_RATE_LIMIT_AUTH_PER_5MIN="0", ELBLASY_LOG_JSON="false",
         ELBLASY_ALLOW_PRIVATE_ODOO_HOSTS="true", ELBLASY_ALLOW_INSECURE_ODOO_HTTP="true",
     )  # fmt: skip
     from elblasy_api.config import get_settings

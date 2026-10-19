@@ -105,6 +105,8 @@ export default function PlanPage() {
         </a>
       </header>
 
+      <Card className="space-y-1 bg-surface2 text-sm"><p><b>{t("rdy_env")}:</b> {t(`env_${body.environment}` as TKey)}</p><p className="text-soft">{t(`env_note_${body.environment}` as TKey)}</p></Card>
+
       {p.status === "completed" && (
         <Card className="rise flex items-center gap-4 border-ok/30 bg-oksoft">
           <PartyPopper className="size-10 text-ok" aria-hidden />

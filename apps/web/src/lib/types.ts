@@ -2,7 +2,7 @@
 export type Lang = "ar" | "en";
 export type Bilingual = Record<Lang, string>;
 
-export interface Me { id: string; email: string; role: string; tenant_id: string; permissions: string[] }
+export interface Me { id: string; email: string; role: string; tenant_id: string; permissions: string[]; display_name?: string; active?: boolean; must_change_password?: boolean; last_login_at?: string }
 
 export interface Connection {
   id: string; name: string; base_url: string; db_name: string; status: string;
@@ -119,3 +119,7 @@ export interface MoneyOverview {
 }
 export interface LedgerRow { id: number; date: string; name: string; label?: string; partner?: string; amount: number; journal: string }
 export interface PendingExpense { id: string; requested_by: string; created_at: string; amount?: number; description?: string; paid_now: boolean }
+
+export interface AuditItem { id: number; ts: string; action: string; outcome: string; actor?: string; target_type?: string; target_id?: string; before?: Record<string, unknown>; after?: Record<string, unknown>; correlation_id?: string }
+export interface OperationItem { id: string; type: string; status: string; actor: string; created_at: string; updated_at: string; safe_error?: string; verified: boolean; needs_attention: boolean }
+export interface AlertItem { key: string; severity: "critical" | "warning" | "info"; count: number; permission: string; link: string; detail: Record<string, unknown> }

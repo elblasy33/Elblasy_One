@@ -84,3 +84,10 @@ export const useExpenses = (cid: string | undefined, offset: number) =>
   useQuery({ queryKey: ["expenses", cid, offset], queryFn: () => api<{ total: number; items: ExpenseRow[] }>(`/connections/${cid}/money/expenses?limit=20&offset=${offset}`), enabled: !!cid, placeholderData: (p) => p });
 export const usePendingExpenses = (cid?: string, enabled = true) =>
   useQuery({ queryKey: ["expense-requests", cid], queryFn: () => api<{ items: PendingExpense[] }>(`/connections/${cid}/money/expense-requests`), enabled: !!cid && enabled, refetchInterval: 20_000 });
+
+import type { AlertItem, AuditItem, Me as MeUser, OperationItem } from "./types";
+export const useAlerts = (enabled = true) =>
+  useQuery({ queryKey: ["alerts"], queryFn: () => api<{ items: AlertItem[]; odoo_reachable: boolean | null }>("/alerts"), enabled, refetchInterval: 60_000 });
+export const useUsers = (enabled = true) => useQuery({ queryKey: ["users"], queryFn: () => api<MeUser[]>("/users"), enabled });
+export const useAudit = (qs: string) => useQuery({ queryKey: ["audit", qs], queryFn: () => api<{ total: number; items: AuditItem[] }>(`/audit?${qs}`), placeholderData: (p) => p });
+export const useOperations = (qs: string) => useQuery({ queryKey: ["operations", qs], queryFn: () => api<{ total: number; items: OperationItem[] }>(`/operations?${qs}`), placeholderData: (p) => p });

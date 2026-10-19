@@ -137,10 +137,16 @@ def test_readiness_requires_permission(client, target):
     cid = client.post("/connections", json=body(url, db, name="R")).json()["id"]
     client.post(
         "/users",
-        json={"email": "cash@example.com", "password": "cashier-password-1", "role": "cashier"},
+        json={
+            "email": "till.user@example.com",
+            "password": "cashier-password-1",
+            "role": "cashier",
+        },
     )
     cash = TestClient(create_app())
-    cash.post("/auth/login", json={"email": "cash@example.com", "password": "cashier-password-1"})
+    cash.post(
+        "/auth/login", json={"email": "till.user@example.com", "password": "cashier-password-1"}
+    )
     assert cash.get(f"/connections/{cid}/readiness").status_code == 403
 
 

@@ -78,10 +78,16 @@ def test_permissions_and_isolation(client, target):  # noqa: F811
     ).json()["id"]
     client.post(
         "/users",
-        json={"email": "acc@example.com", "password": "accountant-pass-1", "role": "accountant"},
+        json={
+            "email": "books.user@example.com",
+            "password": "accountant-pass-1",
+            "role": "accountant",
+        },
     )
     acc = TestClient(create_app())
-    acc.post("/auth/login", json={"email": "acc@example.com", "password": "accountant-pass-1"})
+    acc.post(
+        "/auth/login", json={"email": "books.user@example.com", "password": "accountant-pass-1"}
+    )
     assert acc.get(f"/connections/{cid}/setup/plans/{pid}").status_code == 403  # no config.manage
     other = TestClient(create_app())
     make_owner(other, f"{uuid.uuid4().hex[:8]}@example.com", business="Other")

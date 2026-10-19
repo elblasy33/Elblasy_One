@@ -2,6 +2,7 @@
 import { ArrowLeft, ArrowRight, BadgeDollarSign, CheckCircle2, HandCoins, PackageMinus, PlugZap, ShieldCheck, Wallet, Wrench } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AlertsPanel } from "@/components/alerts-panel";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useLang } from "@/lib/i18n";
@@ -55,6 +56,8 @@ export default function TodayPage() {
       </header>
 
       {loading && <Spinner label={t("loading")} />}
+
+      <AlertsPanel />
 
       {isAdmin && !loading && (
         <section className="grid gap-4 md:grid-cols-3">

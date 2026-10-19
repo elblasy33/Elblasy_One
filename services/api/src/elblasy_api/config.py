@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     # Expenses above this amount, entered by anyone other than the owner/manager, need approval.
     expense_approval_value: float = 1000.0
     cors_origins: list[str] = []
+    # Origins allowed to make state-changing requests with the session cookie (CSRF defence).
+    # Required in production; empty in development means "do not enforce".
+    allowed_origins: list[str] = []
+    # Per-IP limits on state-changing requests (in-process; 0 disables). Auth endpoints use the tighter one.
+    rate_limit_writes_per_min: int = 600
+    rate_limit_auth_per_5min: int = 60
+    log_json: bool = True
 
     @property
     def is_production(self) -> bool:

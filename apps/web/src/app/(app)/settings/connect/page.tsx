@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { Button, Card, ErrorBox, Field } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useHydrated } from "@/lib/hydrated";
+import { cn } from "@/lib/cn";
 import { errorText, useLang } from "@/lib/i18n";
 import type { Connection } from "@/lib/types";
 
@@ -13,6 +14,7 @@ export default function ConnectPage() {
   const hydrated = useHydrated();
   const router = useRouter();
   const qc = useQueryClient();
+  const [mode, setMode] = useState<"new" | "existing">("new");
   const [f, setF] = useState({ name: "", base_url: "", db_name: "", login: "", secret: "" });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const m = useMutation({
@@ -31,6 +33,14 @@ export default function ConnectPage() {
         <h1 className="text-3xl font-black">{t("connect_title")}</h1>
         <p className="mt-1 text-soft">{t("connect_sub")}</p>
       </header>
+      <div role="radiogroup" aria-label={t("mode_title")} className="grid gap-3 sm:grid-cols-2">
+        {(["new", "existing"] as const).map((k) => (
+          <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} className={cn("rounded-2xl border-2 p-4 text-start transition", mode === k ? "border-brand bg-brandsoft" : "border-line bg-surface")}>
+            <span className="block font-black">{t(k === "new" ? "mode_new" : "mode_existing")}</span>
+            <span className="mt-1 block text-sm text-soft">{t(k === "new" ? "mode_new_sub" : "mode_existing_sub")}</span>
+          </button>
+        ))}
+      </div>
       <Card>
         <form method="post" action="#" className="space-y-4" onSubmit={(e: FormEvent) => { e.preventDefault(); m.mutate(); }}>
           <Field label={t("conn_name")} name="name" value={f.name} onChange={set("name")} placeholder="Odoo" />

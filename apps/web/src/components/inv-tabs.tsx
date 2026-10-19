@@ -4,20 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useLang, type TKey } from "@/lib/i18n";
-import { useMe } from "@/lib/queries";
+import { useActiveConnection, useMe } from "@/lib/queries";
 
-const TABS: { href: string; label: TKey; icon: typeof Boxes; perm: string[]; exact?: boolean }[] = [
+const TABS: { href: string; label: TKey; icon: typeof Boxes; perm: string[]; exact?: boolean; cap?: string }[] = [
   { href: "/inventory", label: "tab_products", icon: Boxes, perm: ["products.manage"], exact: true },
   { href: "/inventory/stock", label: "tab_stock", icon: Package, perm: ["inventory.adjust", "purchasing.view", "products.manage"] },
-  { href: "/inventory/suppliers", label: "tab_suppliers", icon: Truck, perm: ["purchasing.view"] },
-  { href: "/inventory/purchases", label: "tab_purchases", icon: ClipboardList, perm: ["purchasing.view"] },
+  { href: "/inventory/suppliers", label: "tab_suppliers", icon: Truck, perm: ["purchasing.view"], cap: "purchase" },
+  { href: "/inventory/purchases", label: "tab_purchases", icon: ClipboardList, perm: ["purchasing.view"], cap: "purchase" },
 ];
 
 export function InventoryTabs() {
   const { t } = useLang();
   const path = usePathname();
   const me = useMe();
-  const tabs = TABS.filter((x) => x.perm.some((p) => me.data?.permissions.includes(p)));
+  const caps = useActiveConnection().data?.capabilities;
+  const tabs = TABS.filter((x) => x.perm.some((p) => me.data?.permissions.includes(p)) && !(x.cap && caps?.[x.cap] === false));
   return (
     <nav aria-label="inventory sections" className="flex flex-wrap gap-2">
       {tabs.map((x) => {

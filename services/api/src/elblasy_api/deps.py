@@ -14,6 +14,7 @@ from elblasy_api.security.rbac import has_permission
 from elblasy_api.security.vault import SecretVault
 
 COOKIE = "elblasy_session"
+_ALLOWED_WHEN_PASSWORD_EXPIRED = {"/auth/me", "/auth/change-password", "/auth/logout"}
 
 
 def api_error(status: int, code: str, message: str) -> HTTPException:
@@ -42,6 +43,12 @@ def current_user(
         raise api_error(401, "unauthenticated", "Invalid or expired session") from exc
     if user is None or not user.active or str(user.tenant_id) != claims.get("tid"):
         raise api_error(401, "unauthenticated", "Invalid or expired session")
+    if (
+        int(claims.get("tv", 0)) != user.token_version
+    ):  # password/role/active changed since this token
+        raise api_error(401, "unauthenticated", "Invalid or expired session")
+    if user.must_change_password and request.url.path not in _ALLOWED_WHEN_PASSWORD_EXPIRED:
+        raise api_error(403, "password_change_required", "Change your password to continue")
     return user
 
 

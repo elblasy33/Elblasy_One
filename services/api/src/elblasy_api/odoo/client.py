@@ -9,6 +9,7 @@ import xmlrpc.client
 from dataclasses import dataclass
 from typing import Any
 
+from elblasy_api.security.pinned import PinnedTransport
 from elblasy_api.security.ssrf import ValidatedUrl
 
 READ_METHODS = frozenset(
@@ -45,6 +46,7 @@ READ_METHODS = frozenset(
         "expense_summary",
         "money_overview",
         "money_ledger",
+        "alerts_snapshot",
     }
 )
 # additive, idempotent, keyed operations only
@@ -96,20 +98,23 @@ class OdooCredentials:
 class BridgeClient:
     def __init__(self, target: ValidatedUrl, creds: OdooCredentials, timeout: float = 15.0) -> None:
         self._base = target.url
+        self._ips = target.resolved_ips
         self._creds = creds
         self._timeout = timeout
         self._uid: int | None = None
 
     def _proxy(self, path: str, timeout: float | None = None) -> Any:
-        transport: xmlrpc.client.Transport = (
-            xmlrpc.client.SafeTransport()
-            if self._base.startswith("https")
-            else xmlrpc.client.Transport()
-        )
-        transport.timeout = timeout or self._timeout  # type: ignore[attr-defined]
-        return xmlrpc.client.ServerProxy(
-            f"{self._base}/xmlrpc/2/{path}", transport=transport, allow_none=True
-        )
+        https = self._base.startswith("https")
+        t = timeout or self._timeout
+        # Connect to the address that was validated, never to a fresh DNS answer (DNS rebinding).
+        transport: xmlrpc.client.Transport
+        if self._ips:
+            transport = PinnedTransport(self._ips[0], https, t)
+        else:  # only tests build a client without a validated address
+            transport = xmlrpc.client.SafeTransport() if https else xmlrpc.client.Transport()
+            transport.timeout = t  # type: ignore[attr-defined]
+        url = f"{self._base}/xmlrpc/2/{path}"
+        return xmlrpc.client.ServerProxy(url, transport=transport, allow_none=True)
 
     def server_version(self) -> dict[str, Any]:
         try:

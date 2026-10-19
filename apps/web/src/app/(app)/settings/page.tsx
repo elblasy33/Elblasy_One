@@ -1,9 +1,9 @@
 "use client";
-import { ChevronLeft, ChevronRight, History, PlugZap, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, PlugZap, ScrollText, ShieldCheck, UserCog, UserRound, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { Badge, Card } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
-import { useConnections, usePlans } from "@/lib/queries";
+import { useConnections, useMe, usePlans } from "@/lib/queries";
 
 export default function SettingsPage() {
   const { t, dir } = useLang();
@@ -11,6 +11,14 @@ export default function SettingsPage() {
   const conn = conns.data?.find((c) => c.status === "active");
   const plans = usePlans(conn?.id);
   const Chev = dir === "rtl" ? ChevronLeft : ChevronRight;
+  const me = useMe();
+  const can = (p: string) => !!me.data?.permissions.includes(p);
+  const links = [
+    { href: "/settings/readiness", icon: ShieldCheck, label: "set_readiness" as const, show: can("config.manage") },
+    { href: "/settings/users", icon: UserCog, label: "set_users" as const, show: can("users.manage") },
+    { href: "/settings/audit", icon: ScrollText, label: "set_audit" as const, show: can("audit.view") },
+    { href: "/settings/account", icon: UserRound, label: "set_account" as const, show: true },
+  ].filter((l) => l.show);
   return (
     <div className="rise space-y-6">
       <h1 className="text-3xl font-black">{t("nav_settings")}</h1>
@@ -25,6 +33,11 @@ export default function SettingsPage() {
           <Link href="/settings/connect" className="inline-flex font-bold text-brand">{t("go_connect")}</Link>
         )}
       </Card>
+      {links.map((l) => (
+        <Link key={l.href} href={l.href} className="flex items-center justify-between rounded-card border border-line bg-surface p-5 shadow-card transition hover:border-brand">
+          <span className="flex items-center gap-3 font-black"><l.icon className="size-5 text-brand" aria-hidden /> {t(l.label)}</span><Chev className="size-5 text-soft" aria-hidden />
+        </Link>
+      ))}
       {conn && (
         <Link href="/settings/setup" className="flex items-center justify-between rounded-card border border-line bg-surface p-5 shadow-card transition hover:border-brand">
           <span className="flex items-center gap-3 font-black"><Wand2 className="size-5 text-accent" aria-hidden /> {t("settings_setup")}</span>

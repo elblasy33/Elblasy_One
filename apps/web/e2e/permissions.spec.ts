@@ -23,3 +23,21 @@ test("a cashier sees only what the server lets them do", async ({ page, browser 
   expect((await p.request.get("/api/connections")).status()).toBe(403);
   await ctx.close();
 });
+
+
+test("pages ship strict security headers and run without CSP violations", async ({ page }) => {
+  const violations: string[] = [];
+  page.on("console", (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) violations.push(m.text()); });
+  const res = await page.goto("/login");
+  const h = res!.headers();
+  expect(h["x-frame-options"]).toBe("DENY");
+  expect(h["x-content-type-options"]).toBe("nosniff");
+  expect(h["referrer-policy"]).toBe("no-referrer");
+  expect(h["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(h["content-security-policy"]).toContain("object-src 'none'");
+  await expect(page.getByRole("button", { name: "تسجيل الدخول" })).toBeVisible();
+  expect(violations).toEqual([]);
+  const api = await page.request.get("/api/healthz");
+  expect(api.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(api.headers()["cache-control"]).toBe("no-store");
+});

@@ -1,5 +1,5 @@
 "use client";
-import { Boxes, LayoutDashboard, Languages, LogOut, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
+import { Boxes, LayoutDashboard, Languages, Lock, LogOut, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -7,14 +7,15 @@ import type { ReactNode } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useLang, type TKey } from "@/lib/i18n";
+import { useActiveConnection } from "@/lib/queries";
 import type { Me } from "@/lib/types";
 
-interface Item { href: string; label: TKey; icon: typeof Store; any: string[] }
+interface Item { href: string; label: TKey; icon: typeof Store; any: string[]; cap?: string }
 const ITEMS: Item[] = [
   { href: "/today", label: "nav_today", icon: LayoutDashboard, any: [] },
-  { href: "/sales", label: "nav_sales", icon: ShoppingCart, any: ["sales.create"] },
-  { href: "/inventory", label: "nav_inventory", icon: Boxes, any: ["inventory.adjust", "products.manage", "reports.view"] },
-  { href: "/money", label: "nav_money", icon: Wallet, any: ["payments.create", "expenses.create", "reports.view"] },
+  { href: "/sales", label: "nav_sales", icon: ShoppingCart, any: ["sales.create"], cap: "pos" },
+  { href: "/inventory", label: "nav_inventory", icon: Boxes, any: ["inventory.adjust", "products.manage", "reports.view"], cap: "inventory" },
+  { href: "/money", label: "nav_money", icon: Wallet, any: ["payments.create", "expenses.create", "reports.view"], cap: "accounting" },
   { href: "/settings", label: "nav_settings", icon: Settings, any: ["config.manage", "connections.manage", "users.manage"] },
 ];
 
@@ -24,7 +25,10 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
   const router = useRouter();
   const qc = useQueryClient();
   // Navigation mirrors server-side permissions; the API enforces them regardless.
-  const items = ITEMS.filter((i) => i.any.length === 0 || i.any.some((p) => me.permissions.includes(p)));
+  const caps = useActiveConnection().data?.capabilities;
+  const off = (i: Item) => !!i.cap && caps?.[i.cap] === false;
+  const isAdmin = me.permissions.includes("config.manage");
+  const items = ITEMS.filter((i) => (i.any.length === 0 || i.any.some((p) => me.permissions.includes(p))) && (!off(i) || isAdmin));
   const logout = async () => {
     await api("/auth/logout", { method: "POST" }).catch(() => undefined);
     qc.clear();
@@ -43,7 +47,7 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
             return (
               <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined}
                 className={cn("flex min-h-12 items-center gap-3 rounded-2xl px-4 font-bold transition", active ? "bg-brandsoft text-brand" : "text-soft hover:bg-surface2 hover:text-ink")}>
-                <i.icon className="size-5" aria-hidden /> {t(i.label)}
+                <i.icon className="size-5" aria-hidden /> {t(i.label)}{off(i) && <Lock className="ms-auto size-4" aria-hidden />}
               </Link>
             );
           })}
