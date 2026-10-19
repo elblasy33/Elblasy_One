@@ -99,3 +99,26 @@ class AuditEvent(Base):
     approval_ref: Mapped[str | None] = mapped_column(String(64))
     outcome: Mapped[str] = mapped_column(String(16))  # success | denied | failure
     correlation_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class SetupPlan(Base):
+    """A reviewed, hash-bound setup plan. Approval applies to exactly `plan_hash`."""
+
+    __tablename__ = "setup_plans"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
+    connection_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("odoo_connections.id"), index=True)
+    template_id: Mapped[str] = mapped_column(String(64))
+    template_version: Mapped[str] = mapped_column(String(16))
+    profile: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    plan: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    plan_hash: Mapped[str] = mapped_column(String(64))
+    snapshot_hash: Mapped[str] = mapped_column(String(64))
+    # draft | approved | superseded | executing | completed | failed | needs_review
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    approvals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=_now, onupdate=_now
+    )

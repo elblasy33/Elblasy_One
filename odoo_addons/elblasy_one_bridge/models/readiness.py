@@ -11,6 +11,11 @@ from odoo import api, models
 _logger = logging.getLogger(__name__)
 FOOTPRINT_MODULES_LIMIT = 50
 CORE_AUTHORS = {"odoosa", "odoo"}
+# Modules the platform may ever plan to install (also the executor's allowlist later).
+PLANNABLE_MODULES = (
+    "account", "sale_management", "purchase", "stock", "stock_account", "point_of_sale",
+    "mrp", "product_expiry", "barcodes", "uom", "sale_stock", "purchase_stock",
+)  # fmt: skip
 
 
 def _section(fn):
@@ -170,8 +175,42 @@ class ElblasyBridgeReadiness(models.AbstractModel):
             out["non_standard_module_count"] = len(names)
             return out
 
+        def modules():
+            found = {
+                m.name: m.state
+                for m in env["ir.module.module"].sudo().search([("name", "in", list(PLANNABLE_MODULES))])
+            }
+            return {n: found.get(n, "absent") for n in PLANNABLE_MODULES}
+
+        def features():
+            u = env.user
+            return {
+                "variants": u.has_group("product.group_product_variant"),
+                "uom": u.has_group("uom.group_uom"),
+                "lots": u.has_group("stock.group_production_lot") if has("stock") else None,
+            }
+
+        def managed_refs():
+            """Records previously created by Elblasy One (stable XML ids in module elblasy_one)."""
+            rows = env["ir.model.data"].sudo().search_read(
+                [("module", "=", "elblasy_one")], ["name", "model", "res_id"], limit=500
+            )
+            return {r["name"]: {"model": r["model"], "res_id": r["res_id"]} for r in rows}
+
+        def barcode():
+            if not has("barcodes"):
+                return {"installed": False}
+            rules = env["barcode.rule"].sudo().search([("type", "=", "weight")])
+            return {
+                "installed": True,
+                "weight_rule_patterns": [r.pattern for r in rules],
+                "company_nomenclature": env.company.nomenclature_id.name
+                if "nomenclature_id" in env.company._fields
+                else None,
+            }
+
         return {
-            "snapshot_version": 1,
+            "snapshot_version": 2,
             "read_only": True,
             "company": _section(company),
             "user_groups": _section(user_groups),
@@ -179,4 +218,8 @@ class ElblasyBridgeReadiness(models.AbstractModel):
             "inventory": _section(inventory),
             "pos": _section(pos),
             "footprint": _section(footprint),
+            "modules": _section(modules),
+            "features": _section(features),
+            "managed_refs": _section(managed_refs),
+            "barcode": _section(barcode),
         }
