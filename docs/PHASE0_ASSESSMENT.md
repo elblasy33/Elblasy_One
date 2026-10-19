@@ -66,8 +66,9 @@ Pytest unit/API; integration suite parameterised over real Odoo 18 and 19 contai
 | Scope explosion | phase gates, no phase skipped |
 
 ## Update — decisions & first live verification (2026-10-19)
-User delegated all open decisions (defaults above adopted) and authorised use of the local Odoo containers as test targets.
-- Test databases created (throwaway): `elblasy_t18` on Odoo 18.0 (:8018), `elblasy_t19` on Odoo 19.0 (:8019); both have web_enterprise, plus sale_management, purchase, stock_account, point_of_sale and `elblasy_one_bridge` installed. Pre-existing DBs (demo, man, test, test-blank, impa) were not touched.
-- Verified live on both: `elblasy.bridge.ping` / `capabilities` (contract v1), version detection, wrong-credential rejection. See `services/api/tests/integration`.
-- Findings: Odoo 19 deprecates /xmlrpc (removal in 22) -> swap transport to /json/2 before then. Both containers ship enterprise addons, so edition is detected by installed `web_enterprise`, not version string. Odoo 19 autoreloads on addon copy (resets in-flight RPC); Odoo 18 needed a container restart.
-- Dev deploy of the addon = copy `odoo_addons/elblasy_one_bridge` into `/opt/odoo-18-one/addons` and `/opt/odoo-19/addons` (19 manifest version `19.0.*`).
+User delegated open decisions (defaults above adopted). **Product target is Odoo Community only; `web_enterprise` and other Enterprise modules are never a dependency.** Enterprise is reported as `unverified_edition` by the compat check.
+- Test targets: `infrastructure/docker/compose.odoo-community.yml` runs pure-community `odoo:18` (:8118, db `ce18`) and `odoo:19` (:8119, db `ce19`) with sale_management, purchase, stock_account, point_of_sale and `elblasy_one_bridge` (mounted read-only from `odoo_addons/`). Master password `dev-master` is dev-only.
+- Verified live on both (4 integration tests): `ping`, `capabilities` (contract v1), version/edition detection, wrong-credential rejection.
+- The user's pre-existing Enterprise containers (:8018/:8019) are not used; the throwaway DBs and addon copies I had created there were removed.
+- Odoo 19 deprecates /xmlrpc (removal in 22): swap the transport to /json/2 before then.
+- Edition is detected via installed `web_enterprise`, not the version string.

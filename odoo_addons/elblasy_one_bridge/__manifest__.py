@@ -1,6 +1,6 @@
 {
     "name": "Elblasy One Bridge",
-    "version": "18.0.0.1.0",
+    "version": "0.1.0",
     "summary": "Allowlisted, permission-checked business API for the Elblasy One platform",
     "category": "Technical",
     "license": "LGPL-3",

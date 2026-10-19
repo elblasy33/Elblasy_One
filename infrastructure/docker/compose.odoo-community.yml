@@ -1,0 +1,20 @@
+# Community-only Odoo test targets (no enterprise addons path). Throwaway data; dev only.
+name: elblasy-odoo-ce
+services:
+  db:
+    image: postgres:14
+    environment: {POSTGRES_USER: odoo, POSTGRES_PASSWORD: odoo, POSTGRES_DB: postgres}
+    volumes: [pgdata:/var/lib/postgresql/data]
+  odoo18:
+    image: odoo:18
+    depends_on: [db]
+    ports: ["8118:8069"]
+    command: ["odoo", "-c", "/etc/odoo/odoo.conf"]
+    volumes: [./odoo-ce.conf:/etc/odoo/odoo.conf:ro, ../../odoo_addons:/mnt/extra-addons:ro, odoo18data:/var/lib/odoo]
+  odoo19:
+    image: odoo:19
+    depends_on: [db]
+    ports: ["8119:8069"]
+    command: ["odoo", "-c", "/etc/odoo/odoo.conf"]
+    volumes: [./odoo-ce.conf:/etc/odoo/odoo.conf:ro, ../../odoo_addons:/mnt/extra-addons:ro, odoo19data:/var/lib/odoo]
+volumes: {pgdata: {}, odoo18data: {}, odoo19data: {}}

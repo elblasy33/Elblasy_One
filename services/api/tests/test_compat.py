@@ -6,13 +6,15 @@ from elblasy_api.security.ssrf import ValidatedUrl
 
 
 def test_assess():
-    ok = {"odoo": {"series": "19.0"}, "contract_version": 1}
+    ok = {"odoo": {"series": "19.0", "edition": "community"}, "contract_version": 1}
     assert assess(ok).status == "supported"
     assert (
-        assess({"odoo": {"series": "17.0"}, "contract_version": 1}).status == "unsupported_version"
+        assess({"odoo": {"series": "17.0", "edition": "community"}, "contract_version": 1}).status
+        == "unsupported_version"
     )
     assert (
-        assess({"odoo": {"series": "18.0"}, "contract_version": 9}).status == "unsupported_contract"
+        assess({"odoo": {"series": "18.0", "edition": "community"}, "contract_version": 9}).status
+        == "unsupported_contract"
     )
 
 
@@ -20,3 +22,8 @@ def test_client_refuses_non_allowlisted_method():
     c = BridgeClient(ValidatedUrl("http://x", "x", 80, ()), OdooCredentials("d", "l", "s"))
     with pytest.raises(OdooError):
         c.call_bridge("unlink_everything")
+
+
+def test_enterprise_is_not_a_verified_target():
+    m = {"odoo": {"series": "18.0", "edition": "enterprise"}, "contract_version": 1}
+    assert assess(m).status == "unverified_edition"
