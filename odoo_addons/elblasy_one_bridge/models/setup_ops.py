@@ -99,6 +99,14 @@ class ElblasyBridgeSetup(models.AbstractModel):
     def _step_enable_feature(self, key, p):
         self._need("base.group_system", "change settings")
         feature = p.get("feature")
+        if feature == "realtime_stock":
+            company = self.env.company
+            if "point_of_sale_update_stock_quantities" not in company._fields:
+                raise UserError("This Odoo has no POS stock-update setting.")
+            if company.point_of_sale_update_stock_quantities == "real":
+                return {"outcome": "already_exists", "refs": {"feature": feature}}
+            company.write({"point_of_sale_update_stock_quantities": "real"})
+            return {"outcome": "enabled", "refs": {"feature": feature}}
         field = FEATURES.get(feature)
         if not field:
             raise UserError(f"Feature not allowed: {feature}")

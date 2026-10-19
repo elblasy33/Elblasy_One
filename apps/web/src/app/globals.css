@@ -77,3 +77,10 @@ html, body { background: var(--bg); color: var(--ink); font-family: var(--font-c
 .rise { animation: rise 0.35s ease both; }
 .pop { animation: pop 0.25s ease both; }
 @media (prefers-reduced-motion: reduce) { .rise, .pop { animation: none; } }
+
+/* Receipt printing: only the receipt is visible, sized for an 80 mm thermal printer. */
+@media print {
+  body * { visibility: hidden !important; }
+  .receipt, .receipt * { visibility: visible !important; }
+  .receipt { position: absolute; inset-inline-start: 0; top: 0; width: 80mm; padding: 4mm; color: #000; background: #fff; box-shadow: none; border: 0; }
+}

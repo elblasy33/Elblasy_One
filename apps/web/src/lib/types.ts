@@ -60,3 +60,31 @@ export interface ProductPage { total: number; items: Product[] }
 export interface CreatedProduct { template_id: number; name: string; barcode?: string; variant_count: number; outcome: string; replayed: boolean }
 export interface ImportValidation { import_id: string; valid: number; invalid: number; rows: { row: number; ok: boolean; errors: string[] }[] }
 export interface ImportResult { created: number; replayed: number; skipped: number; failed: number; rows: { row: number; status: string; errors?: string[] }[] }
+
+export interface SessionView {
+  id: number; name: string; state: string; config_id: number; start_cash: number; expected_cash: number;
+  counted_cash?: number; cash_difference?: number; opened_at?: string; closed_at?: string; order_count: number; move_state?: string;
+}
+export interface PosConfig {
+  id: number; name: string; session?: SessionView; payment_methods: { id: number; name: string; is_cash: boolean }[];
+}
+export interface SalesState { configs: PosConfig[]; currency: string; currency_decimals: number; stock_updates?: string; company?: string }
+export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean }
+export interface QuoteLine { product_id: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
+export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string }
+export interface OrderLine { name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
+export interface OrderView {
+  id: number; name: string; state: string; date_order: string; amount_total: number; amount_tax: number;
+  amount_paid: number; amount_return: number; lines: OrderLine[]; payments: { method: string; amount: number; is_change: boolean }[];
+  refund_of?: number;
+}
+export interface Receipt {
+  company?: string; reference: string; date: string; cashier: string; lines: OrderLine[]; total: number; tax: number;
+  paid: number; change: number; payments: { method: string; amount: number }[];
+}
+export interface SaleResult { order: OrderView; receipt: Receipt; stock_updated: boolean; replayed: boolean }
+export interface CloseResult { session: SessionView; cash_difference: number; has_difference: boolean }
+export interface DaySummary {
+  day: string; orders: number; gross_sales: number; refunds: number; net_sales: number; cash_collected: number;
+  currency: string; definition: Record<string, string>;
+}

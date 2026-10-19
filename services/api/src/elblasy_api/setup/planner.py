@@ -203,6 +203,19 @@ def build_plan(
                               impact="Turns on an Odoo setting; existing products are unaffected.",
                               recovery="The setting can be turned off in Odoo if no data depends on it."))  # fmt: skip
 
+    # --- stock must follow every sale (company-wide POS setting; changes only with approval) ---
+    if (
+        isinstance(feat, dict)
+        and feat.get("pos_stock_realtime") is not None
+        and ((isinstance(pos, dict) and pos.get("installed")) or "module_point_of_sale" in mod_keys)
+    ):
+        steps.append(Step("feature_realtime_stock", "enable_feature",
+                          _t("تحديث المخزون عند كل بيع", "Update stock at every sale"),
+                          {"feature": "realtime_stock"},
+                          "satisfied" if feat.get("pos_stock_realtime") else "to_apply", True, risk="medium",
+                          impact="Stock is deducted when each sale is made instead of when the session closes.",
+                          recovery="The setting can be switched back in Odoo; stock already deducted is not reversed."))  # fmt: skip
+
     # --- weighing scale (native Odoo weight-barcode rule) ---
     if "weighing" in features:
         bc = snapshot.get("barcode", {})

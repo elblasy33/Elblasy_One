@@ -17,5 +17,5 @@ test("phone layout: bottom navigation, RTL, no horizontal scroll", async ({ page
   // touch targets are at least 44px tall
   for (const l of await nav.getByRole("link").all()) expect((await l.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await page.getByRole("link", { name: "المبيعات" }).click();
-  await expect(page.getByText("قيد البناء")).toBeVisible();
+  await expect(page.getByText("لا توجد نقطة بيع مضبوطة بعد")).toBeVisible(); // honest empty state until the shop is connected and set up
 });

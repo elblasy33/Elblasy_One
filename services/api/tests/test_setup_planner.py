@@ -119,3 +119,16 @@ def test_custom_nomenclature_without_weight_rule_is_a_conflict():
     s = snap(barcode={"installed": True, "weight_rule_patterns": []})
     plan = build_plan(BusinessProfile(vertical="grocery", uses_weighing_scale=True), MANIFEST, s)
     assert plan["conflicts"][0]["code"] == "no_weight_barcode_rule"
+
+
+def test_realtime_stock_step_appears_only_when_known_and_is_satisfied_once_on():
+    off = snap()
+    off["features"]["pos_stock_realtime"] = False
+    on = snap()
+    on["features"]["pos_stock_realtime"] = True
+    p = BusinessProfile(vertical="general")
+    assert steps(build_plan(p, MANIFEST, off))["feature_realtime_stock"]["status"] == "to_apply"
+    assert steps(build_plan(p, MANIFEST, on))["feature_realtime_stock"]["status"] == "satisfied"
+    assert "feature_realtime_stock" not in steps(
+        build_plan(p, MANIFEST, snap())
+    )  # unknown -> not guessed

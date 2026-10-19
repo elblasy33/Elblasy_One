@@ -27,3 +27,12 @@ def test_client_refuses_non_allowlisted_method():
 def test_enterprise_is_not_a_verified_target():
     m = {"odoo": {"series": "18.0", "edition": "enterprise"}, "contract_version": 1}
     assert assess(m).status == "unverified_edition"
+
+
+def test_fault_summary_keeps_messages_with_colons():
+    from elblasy_api.odoo.client import _fault_summary
+
+    tb = "Traceback (most recent call last):\n  File x\nodoo.exceptions.UserError: No open session: open the cash register first."
+    assert _fault_summary(tb) == "No open session: open the cash register first."
+    assert _fault_summary("ValueError: bad") == "bad"
+    assert _fault_summary("just text: here") == "just text: here"

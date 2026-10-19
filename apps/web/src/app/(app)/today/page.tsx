@@ -5,16 +5,18 @@ import type { ReactNode } from "react";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useLang } from "@/lib/i18n";
-import { useConnections, useHealth, useMe, usePlans, useReadiness } from "@/lib/queries";
+import { useConnections, useDaySummary, useHealth, useMe, usePlans, useReadiness } from "@/lib/queries";
+import { money } from "@/components/receipt";
 
-function Kpi({ icon, label }: { icon: ReactNode; label: string }) {
+function Kpi({ icon, label, value, note }: { icon: ReactNode; label: string; value?: string | undefined; note?: string | undefined }) {
   const { t } = useLang();
   return (
-    <Card className="flex items-start gap-3 opacity-80">
+    <Card className={cn("flex items-start gap-3", value === undefined && "opacity-80")}>
       <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-surface2 text-soft">{icon}</div>
       <div>
         <p className="font-bold">{label}</p>
-        <p className="mt-1 text-xs text-soft">{t("kpi_na")}</p>
+        {value !== undefined ? <p className="text-2xl font-black" dir="ltr">{value}</p> : null}
+        <p className="mt-1 text-xs text-soft">{value !== undefined ? note : t("kpi_na")}</p>
       </div>
     </Card>
   );
@@ -29,6 +31,8 @@ export default function TodayPage() {
   const health = useHealth(conn?.id);
   const ready = useReadiness(conn?.id);
   const plans = usePlans(conn?.id);
+  const canReport = !!me.data?.permissions.includes("reports.view");
+  const day = useDaySummary(conn?.id, canReport && !!conn);
   const latest = plans.data?.find((p) => p.status !== "superseded");
   const Arrow = dir === "rtl" ? ArrowLeft : ArrowRight;
 
@@ -96,8 +100,8 @@ export default function TodayPage() {
       )}
 
       <section className="grid gap-4 sm:grid-cols-2" aria-label="KPIs">
-        <Kpi icon={<BadgeDollarSign className="size-6" aria-hidden />} label={t("kpi_sales")} />
-        <Kpi icon={<Wallet className="size-6" aria-hidden />} label={t("kpi_cash")} />
+        <Kpi icon={<BadgeDollarSign className="size-6" aria-hidden />} label={t("kpi_sales_net")} value={day.data ? `${money(day.data.net_sales)} ${day.data.currency}` : undefined} note={day.data ? `${day.data.orders} ${t("kpi_orders")} · ${t("kpi_def")}: ${day.data.definition.net_sales}` : undefined} />
+        <Kpi icon={<Wallet className="size-6" aria-hidden />} label={t("kpi_cash_net")} value={day.data ? `${money(day.data.cash_collected)} ${day.data.currency}` : undefined} note={day.data ? `${t("kpi_def")}: ${day.data.definition.cash_collected}` : undefined} />
         <Kpi icon={<PackageMinus className="size-6" aria-hidden />} label={t("kpi_stock")} />
         <Kpi icon={<HandCoins className="size-6" aria-hidden />} label={t("kpi_payables")} />
       </section>

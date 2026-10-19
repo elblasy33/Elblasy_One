@@ -4,6 +4,7 @@ Odoo 18 and 19 both serve /xmlrpc/2 today; Odoo 19 deprecates it (removal in 22)
 transport is the single place to swap for /json/2 later.
 """
 
+import re
 import xmlrpc.client
 from dataclasses import dataclass
 from typing import Any
@@ -18,11 +19,28 @@ READ_METHODS = frozenset(
         "catalog_search",
         "catalog_get",
         "catalog_barcodes_taken",
+        "sales_state",
+        "sales_quote",
+        "sales_lookup",
+        "sales_get_order",
+        "sales_list_orders",
+        "sales_get_session",
+        "sales_summary",
+        "sales_search",
     }
 )
+# additive, idempotent, keyed operations only
 WRITE_METHODS = frozenset(
-    {"apply_step", "catalog_upsert_product", "catalog_set_bom"}
-)  # additive, idempotent, keyed operations only
+    {
+        "apply_step",
+        "catalog_upsert_product",
+        "catalog_set_bom",
+        "sales_open_session",
+        "sales_checkout",
+        "sales_refund",
+        "sales_close_session",
+    }
+)
 ALLOWED_BRIDGE_METHODS = READ_METHODS | WRITE_METHODS
 
 
@@ -109,8 +127,12 @@ class BridgeClient:
         return dict(result)
 
 
+_EXC_PREFIX = re.compile(r"^(?:[A-Za-z_][\w.]*\.)?[A-Za-z_]\w*(?:Error|Exception|Warning): ")
+
+
 def _fault_summary(text: str) -> str:
-    """Last line of an Odoo fault (the human message), bounded; tracebacks are never exposed."""
+    """Last line of an Odoo fault (the human message), bounded; tracebacks are never exposed.
+    Only a leading exception-class prefix is removed, so messages containing ': ' stay whole."""
     lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
     last = lines[-1] if lines else "unknown error"
-    return last.split(": ", 1)[-1][:300]
+    return _EXC_PREFIX.sub("", last, count=1)[:300]

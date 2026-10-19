@@ -190,6 +190,12 @@ class ElblasyBridgeReadiness(models.AbstractModel):
                 "variants": u.has_group("product.group_product_variant"),
                 "uom": u.has_group("uom.group_uom"),
                 "lots": u.has_group("stock.group_production_lot") if has("stock") else None,
+                # when POS sales deduct stock: at every sale ("real") or only at session close
+                "pos_stock_realtime": (
+                    getattr(env.company, "point_of_sale_update_stock_quantities", None) == "real"
+                    if has("point_of_sale")
+                    else None
+                ),
             }
 
         def managed_refs():

@@ -37,3 +37,15 @@ export function useShopFeatures(cid?: string) {
   const plan = usePlan(cid, latest?.id);
   return { features: new Set(plan.data?.plan.features ?? []), vertical: (plan.data?.plan.profile?.vertical as string | undefined) ?? null, ready: plans.isSuccess && (!latest || plan.isSuccess) };
 }
+
+import type { DaySummary, OrderView, SalesState } from "./types";
+export const useSalesState = (cid?: string) =>
+  useQuery({ queryKey: ["sales-state", cid], queryFn: () => api<SalesState>(`/connections/${cid}/sales/state`), enabled: !!cid, staleTime: 5_000 });
+export const useSessionOrders = (cid?: string, sessionId?: number) =>
+  useQuery({
+    queryKey: ["sales-orders", cid, sessionId],
+    queryFn: () => api<{ total: number; items: OrderView[] }>(`/connections/${cid}/sales/orders?session_id=${sessionId}&limit=50`),
+    enabled: !!cid && !!sessionId,
+  });
+export const useDaySummary = (cid?: string, enabled = true) =>
+  useQuery({ queryKey: ["sales-summary", cid], queryFn: () => api<DaySummary>(`/connections/${cid}/sales/summary`), enabled: !!cid && enabled, staleTime: 30_000 });
