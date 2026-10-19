@@ -138,3 +138,10 @@ export interface InsightsData {
   slow_moving?: { days: number; count: number; items: { product_id: number; name: string; qty: number; value: number }[] };
   expiring?: { days: number; count: number; items: { product: string; lot: string; qty: number; expires: string; expired: boolean }[] };
 }
+
+export interface ReportSection { total: number; accounts: { code: string; name: string; amount: number }[] }
+export interface MoneyReport {
+  currency: string; date_from: string; date_to: string; income: ReportSection; cogs: ReportSection; expenses: ReportSection;
+  gross_profit: number; net_profit: number; unclosed_sessions: number;
+  cash_flow: { journal: string; type: string; opening: number; in: number; out: number; closing: number }[];
+}

@@ -246,3 +246,54 @@ class ElblasyBridgeMoney(models.AbstractModel):
             "id": l.id, "date": str(l.date), "name": l.move_id.name, "label": l.name or l.move_id.ref or None,
             "partner": l.partner_id.name or None, "amount": l.balance, "journal": l.journal_id.name,
         } for l in rows]})  # fmt: skip
+
+    @api.model
+    def money_report(self, date_from, date_to):
+        """Income statement and cash movement for a period, from posted accounting entries only."""
+        self._require_internal_user()
+        self._need_accounting()
+        d1, d2 = _day(date_from, "from"), _day(date_to, "to")
+        if d1 > d2:
+            raise UserError("The start date is after the end date.")
+        cur = self.env.company.currency_id
+        Line = self.env["account.move.line"]
+        base = [("parent_state", "=", "posted"), ("date", ">=", d1), ("date", "<=", d2), ("company_id", "=", self.env.company.id)]
+
+        def section(types, sign):
+            rows = Line.read_group(base + [("account_id.account_type", "in", types)], ["balance:sum"], ["account_id"], lazy=False)
+            items = []
+            for r in rows:
+                acc = self.env["account.account"].browse(r["account_id"][0])
+                amount = cur.round(sign * r["balance"])
+                if amount:
+                    items.append({"code": acc.code, "name": acc.name, "amount": amount})
+            items.sort(key=lambda i: -abs(i["amount"]))
+            return {"total": cur.round(sum(i["amount"] for i in items)), "accounts": items}
+
+        income = section(["income", "income_other"], -1)
+        cogs = section(["expense_direct_cost"], 1)
+        expenses = section(["expense", "expense_depreciation"], 1)
+        flow = []
+        for j in self.env["account.journal"].search([("type", "in", ("cash", "bank"))]):
+            accts = self._journal_cash_accounts(j)
+            if not accts:
+                continue
+            dom = [("account_id", "in", accts.ids), ("journal_id", "=", j.id), ("parent_state", "=", "posted")]
+            opening = sum(Line.search(dom + [("date", "<", d1)]).mapped("balance"))
+            inside = Line.search(dom + [("date", ">=", d1), ("date", "<=", d2)])
+            money_in = sum(inside.mapped("debit"))
+            money_out = sum(inside.mapped("credit"))
+            flow.append({"journal": j.name, "type": j.type, "opening": cur.round(opening), "in": cur.round(money_in),
+                         "out": cur.round(money_out), "closing": cur.round(opening + money_in - money_out)})  # fmt: skip
+        open_sessions = self.env["pos.session"].search_count([("state", "!=", "closed")]) if "pos.session" in self.env else 0
+        gross = cur.round(income["total"] - cogs["total"])
+        return wire({
+            "currency": cur.name, "date_from": str(d1), "date_to": str(d2),
+            "income": income, "cogs": cogs, "expenses": expenses,
+            "gross_profit": gross, "net_profit": cur.round(gross - expenses["total"]), "cash_flow": flow,
+            "unclosed_sessions": open_sessions,
+            "definition": {
+                "income_statement": "Posted accounting entries in the period by account type (income, direct cost, expenses). Shop sales reach accounting when the register session is closed.",
+                "cash_flow": "Posted movements on each cash/bank journal's own account (book basis; payments not yet reconciled to the bank are not counted)",
+            },
+        })  # fmt: skip

@@ -50,6 +50,7 @@ READ_METHODS = frozenset(
         "expense_list",
         "expense_summary",
         "money_overview",
+        "money_report",
         "money_ledger",
         "alerts_snapshot",
         "customers_search",

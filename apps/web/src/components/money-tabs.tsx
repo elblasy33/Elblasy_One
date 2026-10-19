@@ -1,5 +1,5 @@
 "use client";
-import { Landmark, Receipt, Tags, Users } from "lucide-react";
+import { BarChart3, Landmark, Receipt, Tags, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -10,6 +10,7 @@ const TABS: { href: string; label: TKey; icon: typeof Landmark; perm: string[]; 
   { href: "/money", label: "mn_title", icon: Landmark, perm: ["reports.view", "payments.create"], exact: true },
   { href: "/money/expenses", label: "ex_title", icon: Receipt, perm: ["expenses.create", "reports.view", "payments.create"] },
   { href: "/money/receivables", label: "cu_title", icon: Users, perm: ["payments.create", "reports.view"] },
+  { href: "/money/reports", label: "rp_title", icon: BarChart3, perm: ["reports.view"] },
   { href: "/money/categories", label: "ex_cats", icon: Tags, perm: ["config.manage"] },
 ];
 

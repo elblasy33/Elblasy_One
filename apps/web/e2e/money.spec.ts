@@ -99,4 +99,12 @@ test("expenses: category, on-credit vs paid-now, paying later, approval, and hon
   await expect(page.getByText("مصروفات بانتظار الموافقة")).toBeHidden({ timeout: 20_000 });
   await expect.poll(async () => (await odoo("account.move", "search_read", [[["move_type", "=", "in_invoice"]]], { fields: ["id"] })).length as number, { timeout: 20_000 }).toBe(mid + 1); // booked only after approval
   await expect(page.getByText("معدات كبيرة")).toBeVisible();
+
+  // ---- financial report page renders the income statement and cash movement
+  await page.goto("/money/reports");
+  await expect(page.getByRole("heading", { name: "قائمة الدخل" })).toBeVisible();
+  await expect(page.getByText("صافي الربح")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "حركة النقدية والبنك" })).toBeVisible();
+  await page.getByRole("radio", { name: "هذه السنة" }).click();
+  await expect(page.getByText("مجمل الربح")).toBeVisible();
 });

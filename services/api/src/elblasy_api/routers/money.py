@@ -5,7 +5,7 @@ separate payment (the cash movement). The platform never assumes an expense is p
 a threshold entered by someone other than the owner/manager wait for approval."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -410,6 +410,22 @@ def overview(
     recv = _read(client, "receivables_overview")
     return {**base, "expenses_month": exp, "receivables": recv,
             "net_profit": {"available": False, "reason": "Net profit needs revenue, cost of goods sold and all expenses from a closed accounting period; it is not estimated from cash movements."}}  # fmt: skip
+
+
+@router.get("/report")
+def report(
+    cid: uuid.UUID, date_from: str | None = Query(default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(default=None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    user: User = Depends(require(P_REPORTS)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    """Income statement and cash movement for a period from posted accounting entries (default: this month)."""
+    _, client = _conn(db, user, cid, s, vault)
+    d1 = _month()[0]
+    d2 = (datetime.fromisoformat(d1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    if date_from and date_to and date_from > date_to:
+        raise api_error(422, "validation", "The start date is after the end date")
+    return _read(client, "money_report", date_from or d1, date_to or d2.strftime("%Y-%m-%d"))
 
 
 @router.get("/ledger")
