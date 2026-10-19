@@ -1,1 +1,1 @@
-from . import bridge, readiness, setup_ops
+from . import bridge, readiness, setup_ops, catalog_ops

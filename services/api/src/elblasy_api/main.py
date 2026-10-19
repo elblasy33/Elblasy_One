@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from elblasy_api.config import get_settings
-from elblasy_api.routers import auth, connections, setup
+from elblasy_api.routers import auth, catalog, connections, setup
 
 log = logging.getLogger("elblasy")
 
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(connections.router)
     app.include_router(setup.router)
+    app.include_router(catalog.router)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

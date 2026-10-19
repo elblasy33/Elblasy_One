@@ -58,6 +58,21 @@ const ar = {
   conflict_multi_branch: "تعدد الفروع غير مدعوم بعد. ابدأ بفرع واحد.", conflict_weighing_with_variants: "الأصناف الموزونة مع المقاسات والألوان غير مدعومة.",
   conflict_no_weight_barcode_rule: "لا توجد قاعدة باركود وزن في أودو. راجع إعداد الباركود يدويًا قبل استخدام الميزان.", conflict_incompatible_environment: "نسخة أودو هذه غير معتمدة بعد، فلا يمكن تطبيق خطة عليها.",
   blocked_generic: "غير متاح الآن",
+  prod_title: "المنتجات", prod_search: "ابحث بالاسم أو الباركود", prod_add: "منتج جديد", prod_import: "استيراد من ملف", prod_none: "لا توجد منتجات بعد", prod_none_sub: "أضف أول منتج أو استورد قائمتك دفعة واحدة.",
+  prod_found: "منتج", prod_price: "السعر", prod_cost: "التكلفة", prod_stock: "في المخزن", prod_by_weight: "بالوزن", prod_variants: "نوع/مقاس", prod_lot: "صلاحية/دفعات",
+  prod_prev: "السابق", prod_next: "التالي", prod_no_stock_info: "غير متابَع",
+  np_title: "منتج جديد", np_name: "اسم المنتج", np_price: "سعر البيع", np_cost: "سعر الشراء (التكلفة)", np_category: "التصنيف (اختياري)", np_sku: "كود داخلي (اختياري)",
+  np_barcode: "الباركود", np_bc_type: "اكتبه", np_bc_auto: "ولّد تلقائيًا", np_bc_scale: "كود ميزان تلقائي", np_bc_none: "بدون باركود",
+  np_weight: "يُباع بالوزن (كيلو)", np_weight_hint: "سيُحفظ بكود الميزان ليقرأه الكاشير مباشرة.",
+  np_variants: "له مقاسات أو ألوان", np_attr_name: "الخاصية", np_attr_values: "القيم (افصل بفاصلة)", np_add_attr: "إضافة خاصية", np_preset_shoes: "مقاسات أحذية ٣٦–٤٦", np_preset_clothes: "مقاسات ملابس S–XXL", np_variants_total: "عدد التركيبات",
+  np_lot: "يتبع الصلاحية والدفعات", np_pos: "يظهر في شاشة البيع", np_made: "منتج مصنّع عندي",
+  np_save: "حفظ المنتج", np_saved: "تم حفظ المنتج", np_verified: "وتحقّقنا منه في أودو", np_another: "إضافة منتج آخر", np_to_recipe: "حدّد مكوّناته", np_to_list: "عرض المنتجات",
+  np_retry_note: "إن انقطع الاتصال أعد الضغط، لن يُكرَّر المنتج.", np_unknown: "ربما تم الحفظ. اضغط حفظ مرة أخرى بأمان ولن يتكرر المنتج.",
+  rc_title: "مكوّنات المنتج المصنّع", rc_yield: "الكمية الناتجة", rc_add: "أضف مكوّنًا", rc_qty: "الكمية", rc_save: "حفظ الوصفة", rc_saved: "تم حفظ الوصفة", rc_pick: "اختر المنتج المصنّع", rc_search: "ابحث عن مكوّن",
+  im_title: "استيراد المنتجات", im_sub: "الصق ملف CSV أو اختره. سنراجعه أولًا ولن نُنشئ شيئًا قبل موافقتك.", im_template: "تنزيل نموذج", im_choose: "اختر ملفًا", im_paste: "أو الصق المحتوى هنا",
+  im_check: "راجع الملف", im_rows: "صفوف", im_valid: "سليمة", im_invalid: "بها مشكلات", im_commit: "أنشئ الصفوف السليمة", im_done: "تم الاستيراد", im_created: "تم إنشاؤها", im_skipped: "تم تخطيها", im_limit: "حتى ١٠٠ صف في المرة الواحدة.", im_row: "صف",
+  err_product_rejected: "رفض أودو المنتج.", err_idempotency_conflict: "تم استخدام هذا الطلب لبيانات مختلفة. حدّث الصفحة.", err_outcome_unknown: "ربما تم الحفظ. اضغط حفظ مرة أخرى بأمان.", err_in_progress: "العملية ما زالت جارية، انتظر لحظة.",
+  err_verification_failed: "تعذّر التأكد من المنتج في أودو. راجعه قبل المتابعة.", err_recipe_rejected: "رفض أودو الوصفة.", err_verification_unavailable: "تم الحفظ لكن تعذّر التحقق. اضغط حفظ مرة أخرى بأمان.",
 } as const;
 
 type Key = keyof typeof ar;
@@ -116,6 +131,21 @@ const en: Record<Key, string> = {
   conflict_multi_branch: "Multiple branches aren't supported yet. Start with one.", conflict_weighing_with_variants: "Weighed items with sizes/colours are not supported.",
   conflict_no_weight_barcode_rule: "No weight-barcode rule exists in Odoo. Review the barcode setup manually before using a scale.", conflict_incompatible_environment: "This Odoo version isn't verified yet, so no plan can be applied.",
   blocked_generic: "Not available right now",
+  prod_title: "Products", prod_search: "Search by name or barcode", prod_add: "New product", prod_import: "Import from file", prod_none: "No products yet", prod_none_sub: "Add your first product or import your list in one go.",
+  prod_found: "products", prod_price: "Price", prod_cost: "Cost", prod_stock: "In stock", prod_by_weight: "By weight", prod_variants: "variants", prod_lot: "Expiry/lots",
+  prod_prev: "Previous", prod_next: "Next", prod_no_stock_info: "Not tracked",
+  np_title: "New product", np_name: "Product name", np_price: "Selling price", np_cost: "Purchase price (cost)", np_category: "Category (optional)", np_sku: "Internal code (optional)",
+  np_barcode: "Barcode", np_bc_type: "Type it", np_bc_auto: "Generate", np_bc_scale: "Auto scale code", np_bc_none: "No barcode",
+  np_weight: "Sold by weight (kg)", np_weight_hint: "Saved with a scale code so the cashier can scan it directly.",
+  np_variants: "Has sizes or colours", np_attr_name: "Attribute", np_attr_values: "Values (comma-separated)", np_add_attr: "Add attribute", np_preset_shoes: "Shoe sizes 36–46", np_preset_clothes: "Clothing sizes S–XXL", np_variants_total: "Combinations",
+  np_lot: "Track expiry & lots", np_pos: "Show on the sales screen", np_made: "I make this product",
+  np_save: "Save product", np_saved: "Product saved", np_verified: "and verified in Odoo", np_another: "Add another", np_to_recipe: "Set its ingredients", np_to_list: "View products",
+  np_retry_note: "If the connection drops, press again: the product won't be duplicated.", np_unknown: "It may have been saved. Press save again safely; it won't be duplicated.",
+  rc_title: "Ingredients of a made product", rc_yield: "Quantity produced", rc_add: "Add ingredient", rc_qty: "Quantity", rc_save: "Save recipe", rc_saved: "Recipe saved", rc_pick: "Pick the made product", rc_search: "Search an ingredient",
+  im_title: "Import products", im_sub: "Paste a CSV or choose a file. We check it first and create nothing until you confirm.", im_template: "Download template", im_choose: "Choose a file", im_paste: "or paste the content here",
+  im_check: "Check the file", im_rows: "rows", im_valid: "valid", im_invalid: "with problems", im_commit: "Create the valid rows", im_done: "Import finished", im_created: "created", im_skipped: "skipped", im_limit: "Up to 100 rows at a time.", im_row: "Row",
+  err_product_rejected: "Odoo rejected the product.", err_idempotency_conflict: "This request was used with different data. Refresh the page.", err_outcome_unknown: "It may have been saved. Press save again safely.", err_in_progress: "Still running, wait a moment.",
+  err_verification_failed: "Couldn't confirm the product in Odoo. Check it before continuing.", err_recipe_rejected: "Odoo rejected the recipe.", err_verification_unavailable: "Saved, but couldn't verify. Press save again safely.",
 };
 
 const dict = { ar, en } as const;

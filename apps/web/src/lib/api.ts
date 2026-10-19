@@ -11,13 +11,13 @@ export class ApiError extends Error {
 
 type Body = Record<string, unknown> | undefined;
 
-export async function api<T>(path: string, init?: { method?: string; body?: Body }): Promise<T> {
+export async function api<T>(path: string, init?: { method?: string; body?: Body | unknown; headers?: Record<string, string> }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {
       method: init?.method ?? (init?.body ? "POST" : "GET"),
       credentials: "same-origin",
-      headers: init?.body ? { "content-type": "application/json" } : undefined,
+      headers: init?.body ? { "content-type": "application/json", ...init.headers } : init?.headers,
       body: init?.body ? JSON.stringify(init.body) : undefined,
     });
   } catch {

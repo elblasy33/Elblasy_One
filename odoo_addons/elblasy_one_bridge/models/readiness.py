@@ -8,6 +8,8 @@ import logging
 
 from odoo import api, models
 
+from .bridge import wire
+
 _logger = logging.getLogger(__name__)
 FOOTPRINT_MODULES_LIMIT = 50
 CORE_AUTHORS = {"odoosa", "odoo"}
@@ -209,7 +211,7 @@ class ElblasyBridgeReadiness(models.AbstractModel):
                 else None,
             }
 
-        return {
+        return wire({
             "snapshot_version": 2,
             "read_only": True,
             "company": _section(company),
@@ -222,4 +224,4 @@ class ElblasyBridgeReadiness(models.AbstractModel):
             "features": _section(features),
             "managed_refs": _section(managed_refs),
             "barcode": _section(barcode),
-        }
+        })

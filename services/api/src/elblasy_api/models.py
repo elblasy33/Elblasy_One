@@ -123,3 +123,14 @@ class SetupPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_now, onupdate=_now
     )
+
+
+class BarcodeSequence(Base):
+    """Per-connection counters for platform-generated barcodes (scale codes, in-store codes)."""
+
+    __tablename__ = "barcode_sequences"
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("odoo_connections.id"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)  # scale | internal
+    next_value: Mapped[int] = mapped_column(BigInteger, default=1)

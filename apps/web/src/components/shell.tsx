@@ -13,7 +13,7 @@ interface Item { href: string; label: TKey; icon: typeof Store; any: string[] }
 const ITEMS: Item[] = [
   { href: "/today", label: "nav_today", icon: LayoutDashboard, any: [] },
   { href: "/sales", label: "nav_sales", icon: ShoppingCart, any: ["sales.create"] },
-  { href: "/inventory", label: "nav_inventory", icon: Boxes, any: ["inventory.adjust", "reports.view"] },
+  { href: "/inventory", label: "nav_inventory", icon: Boxes, any: ["inventory.adjust", "products.manage", "reports.view"] },
   { href: "/money", label: "nav_money", icon: Wallet, any: ["payments.create", "expenses.create", "reports.view"] },
   { href: "/settings", label: "nav_settings", icon: Settings, any: ["config.manage", "connections.manage", "users.manage"] },
 ];

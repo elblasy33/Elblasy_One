@@ -11,6 +11,7 @@ import re
 from odoo import api, models
 from odoo.exceptions import AccessError, UserError
 
+from .bridge import wire
 from .readiness import PLANNABLE_MODULES
 
 _logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class ElblasyBridgeSetup(models.AbstractModel):
                      op_id, kind, key, self.env.user.login)  # fmt: skip
         result = getattr(self, self._STEP_HANDLERS[kind])(key, params)
         _logger.info("elblasy apply_step op=%s -> %s", op_id, result.get("outcome"))
-        return result
+        return wire(result)
 
     _STEP_HANDLERS = {
         "install_module": "_step_install_module",

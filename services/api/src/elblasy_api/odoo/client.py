@@ -10,8 +10,19 @@ from typing import Any
 
 from elblasy_api.security.ssrf import ValidatedUrl
 
-READ_METHODS = frozenset({"ping", "capabilities", "readiness_snapshot"})
-WRITE_METHODS = frozenset({"apply_step"})  # additive, idempotent, keyed operations only
+READ_METHODS = frozenset(
+    {
+        "ping",
+        "capabilities",
+        "readiness_snapshot",
+        "catalog_search",
+        "catalog_get",
+        "catalog_barcodes_taken",
+    }
+)
+WRITE_METHODS = frozenset(
+    {"apply_step", "catalog_upsert_product", "catalog_set_bom"}
+)  # additive, idempotent, keyed operations only
 ALLOWED_BRIDGE_METHODS = READ_METHODS | WRITE_METHODS
 
 

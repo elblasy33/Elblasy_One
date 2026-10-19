@@ -1,7 +1,7 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Connection, Me, Plan, PlanListItem, Readiness } from "./types";
+import type { Connection, Me, Plan, PlanListItem, ProductPage, Readiness } from "./types";
 
 export const useMe = () => useQuery({ queryKey: ["me"], queryFn: () => api<Me>("/auth/me"), retry: false, staleTime: 60_000 });
 export const useConnections = (enabled = true) =>
@@ -23,3 +23,17 @@ export const useHealth = (cid?: string) =>
     queryFn: () => api<{ ok: boolean; status: string; checked_at?: string; compatibility?: string }>(`/connections/${cid}/health`),
     enabled: !!cid, staleTime: 60_000,
   });
+export const useProducts = (cid: string | undefined, q: string, offset: number, limit = 20) =>
+  useQuery({
+    queryKey: ["products", cid, q, offset],
+    queryFn: () => api<ProductPage>(`/connections/${cid}/catalog/products?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
+    enabled: !!cid, placeholderData: (prev) => prev,
+  });
+
+/** Features the business chose during setup (from its latest plan). Drives which product fields appear. */
+export function useShopFeatures(cid?: string) {
+  const plans = usePlans(cid);
+  const latest = plans.data?.find((p) => p.status !== "superseded") ?? plans.data?.[0];
+  const plan = usePlan(cid, latest?.id);
+  return { features: new Set(plan.data?.plan.features ?? []), vertical: (plan.data?.plan.profile?.vertical as string | undefined) ?? null, ready: plans.isSuccess && (!latest || plan.isSuccess) };
+}

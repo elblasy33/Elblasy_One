@@ -10,6 +10,16 @@ from odoo.exceptions import AccessError
 
 CONTRACT_VERSION = 1
 
+
+def wire(value):
+    """Odoo's XML-RPC cannot marshal None. Drop None-valued keys (absent == null for the platform)
+    and convert tuples/sets to lists, recursively. Every public bridge result goes through this."""
+    if isinstance(value, dict):
+        return {k: wire(v) for k, v in value.items() if v is not None}
+    if isinstance(value, (list, tuple, set)):
+        return [wire(v) for v in value if v is not None]
+    return value
+
 # Modules whose presence the platform cares about -> capability name.
 TRACKED_MODULES = {
     "account": "accounting",
@@ -64,7 +74,7 @@ class ElblasyBridge(models.AbstractModel):
         warehouses = (
             self.env["stock.warehouse"].search_count([]) if "stock" in installed else None
         )
-        return {
+        return wire({
             "contract_version": CONTRACT_VERSION,
             "odoo": {
                 "series": f"{version_info[0]}.{version_info[1]}",
@@ -78,4 +88,4 @@ class ElblasyBridge(models.AbstractModel):
             "capabilities": caps,
             "multi_warehouse": (warehouses or 0) > 1 if warehouses is not None else None,
             "user": {"id": user.id, "login": user.login},
-        }
+        })

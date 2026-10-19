@@ -24,6 +24,7 @@ export interface PlanStep {
 }
 export interface PlanBody {
   template: { id: string; version: string }; environment: string; mode: string;
+  features: string[]; profile: Record<string, unknown>;
   steps: PlanStep[]; existing_notes: { area: string; note: string }[];
   conflicts: { code: string; reason: string }[]; unsupported: { code: string; reason: string }[];
   required_approvals: string[]; summary: { to_apply: number; satisfied: number; blocked: number };
@@ -49,3 +50,13 @@ export interface Readiness {
   environment: string; summary: { total: number; blocking_issues_absent: boolean; by_severity: Record<string, number> };
   findings: Finding[]; scanned_at: string;
 }
+
+export interface Product {
+  template_id: number; name: string; sku?: string; barcode?: string; price: number; cost?: number;
+  category?: string; uom: string; on_hand?: number; tracking: string; variant_count: number;
+  by_weight: boolean; in_pos: boolean; managed: boolean;
+}
+export interface ProductPage { total: number; items: Product[] }
+export interface CreatedProduct { template_id: number; name: string; barcode?: string; variant_count: number; outcome: string; replayed: boolean }
+export interface ImportValidation { import_id: string; valid: number; invalid: number; rows: { row: number; ok: boolean; errors: string[] }[] }
+export interface ImportResult { created: number; replayed: number; skipped: number; failed: number; rows: { row: number; status: string; errors?: string[] }[] }
