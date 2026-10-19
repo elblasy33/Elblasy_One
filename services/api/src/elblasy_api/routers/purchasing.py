@@ -66,6 +66,11 @@ class ReceiveIn(BaseModel):
     lines: list[ReceiveLineIn] = Field(min_length=1, max_length=100)
 
 
+class ReturnIn(BaseModel):
+    lines: list[ReceiveLineIn] = Field(min_length=1, max_length=100)
+    reason: str = Field(default="", max_length=200)
+
+
 class PayIn(BaseModel):
     amount: float = Field(gt=0, le=1e9)
     journal_type: Literal["cash", "bank"] = "cash"
@@ -274,6 +279,70 @@ def receive(
         what="receipt", audit_action="purchasing.order.receive", target_type="purchase_order",
         target_id=lambda o: o["order"]["id"], audit_after=lambda o: {"received": o["received"]},
         rejected_code="receipt_rejected",
+    )  # fmt: skip
+    out["order"] = _hide_costs(user, out["order"])
+    return out
+
+
+@router.post("/orders/{order_id}/return", status_code=201)
+def return_goods(
+    cid: uuid.UUID, order_id: int, body: ReturnIn, idem: IDEM, request: Request,
+    user: User = Depends(require(P_PURCHASING)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    c, client = _conn(db, user, cid, s, vault)
+    wanted: dict[int, float] = {}
+    for ln in body.lines:
+        wanted[ln.line_id] = wanted.get(ln.line_id, 0.0) + ln.qty
+
+    def before() -> dict[str, Any]:
+        got = _read(client, "purchase_get", order_id)
+        if not got.get("found"):
+            raise api_error(404, "not_found", "Order not found")
+        billed = any(
+            b["move_type"] == "in_invoice" and b["state"] == "posted"
+            for b in got["order"].get("bills", [])
+        )
+        if billed and not has_permission(user.role, P_PAYMENTS):  # a credit note is accounting
+            raise api_error(
+                403, "forbidden", "This order is billed: ask the accountant or manager to return it"
+            )
+        return {"order": got["order"], "levels": _order_levels(client, got["order"])}
+
+    def verify(res: dict[str, Any], prior: dict[str, Any]) -> dict[str, Any]:
+        got = client.call_bridge("purchase_get", order_id)
+        after = got["order"] if got.get("found") else None
+        if not after:
+            raise _verification_failed("return")
+        prev = {line["id"]: line for line in prior["order"]["lines"]}
+        by_product: dict[int, float] = {}
+        for ln in after["lines"]:
+            if ln["id"] in wanted:
+                if abs(ln["received"] - (prev[ln["id"]]["received"] - wanted[ln["id"]])) > TOL:
+                    raise _verification_failed("returned quantity")
+                by_product[ln["product_id"]] = (
+                    by_product.get(ln["product_id"], 0.0) + wanted[ln["id"]]
+                )
+        levels = _order_levels(client, after)
+        for pid, qty in by_product.items():  # the goods really left the shelf
+            was = prior["levels"].get(str(pid), {}).get("on_hand", 0.0)
+            if abs(levels.get(str(pid), {}).get("on_hand", -1) - (was - qty)) > TOL:
+                raise _verification_failed("stock level")
+        return {
+            "order": after,
+            "stock": levels,
+            "returned": by_product,
+            "credit_note": res["refs"].get("credit_note"),
+        }
+
+    out = operations.run_write(
+        db, request, user=user, conn=c, client=client, op_type="purchasing.order.return", idem=idem,
+        payload={"order_id": order_id, **body.model_dump()}, method="purchase_return",
+        spec={"order_id": order_id, "lines": [ln.model_dump() for ln in body.lines]}, verify=verify, before=before,
+        what="return", audit_action="purchasing.order.return", target_type="purchase_order",
+        target_id=lambda o: o["order"]["id"],
+        audit_after=lambda o: {"returned": o["returned"], "credit_note": bool(o.get("credit_note")), "reason": body.reason},
+        rejected_code="return_rejected",
     )  # fmt: skip
     out["order"] = _hide_costs(user, out["order"])
     return out

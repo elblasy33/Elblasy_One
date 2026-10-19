@@ -87,4 +87,17 @@ test("owner buys goods: supplier, order, partial receipt, bill, partial payment,
   expect(bills[0].state).toBe("posted");
   expect(Math.abs(bills[0].amount_total - 6 * 20 * 1.14)).toBeLessThan(0.02);
   expect(bills[0].payment_state).toBe("partial");
+
+  // ---- send 2 back to the supplier: stock drops, the billed order gets a posted credit note
+  await page.goto("/inventory/purchases");
+  await page.getByRole("link", { name: /P0/ }).first().click();
+  await page.getByRole("button", { name: "إرجاع للمورد" }).click();
+  await page.getByLabel("الكمية", { exact: true }).fill("2");
+  await page.getByRole("button", { name: "أرجع البضاعة" }).click();
+  await expect(page.getByText("تم إرجاع البضاعة للمورد")).toBeVisible();
+  expect((await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] }))[0].qty_available).toBe(4);
+  const notes = await odoo("account.move", "search_read", [[["move_type", "=", "in_refund"], ["partner_id.name", "=", supplierName]]], { fields: ["state", "amount_total"] });
+  expect(notes).toHaveLength(1);
+  expect(notes[0].state).toBe("posted");
+  expect(Math.abs(notes[0].amount_total - 2 * 20 * 1.14)).toBeLessThan(0.02);
 });

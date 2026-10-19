@@ -1,6 +1,6 @@
 "use client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Banknote, FileText, PackageCheck, XCircle } from "lucide-react";
+import { Banknote, FileText, PackageCheck, Undo2, XCircle } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
@@ -39,7 +39,7 @@ export default function PurchaseDetail() {
   const me = useMe();
   const cid = useActiveConnection().data?.id;
   const data = usePurchaseOrder(cid, id);
-  const [dlg, setDlg] = useState<"receive" | "pay" | null>(null);
+  const [dlg, setDlg] = useState<"receive" | "pay" | "return" | null>(null);
   const [payBill, setPayBill] = useState<BillBrief | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const can = (p: string) => !!me.data?.permissions.includes(p);
@@ -90,6 +90,7 @@ export default function PurchaseDetail() {
 
       <div className="flex flex-wrap gap-3">
         {can("purchasing.manage") && rs !== "full" && <Button onClick={() => setDlg("receive")}><PackageCheck className="size-5" aria-hidden /> {t("po_receive")}</Button>}
+        {can("purchasing.manage") && o.lines.some((l) => l.received > 0) && <Button variant="ghost" onClick={() => setDlg("return")}><Undo2 className="size-5" aria-hidden /> {t("po_return")}</Button>}
         {canBillNow && <Button variant="soft" loading={bill.isPending} onClick={() => bill.mutate()}><FileText className="size-5" aria-hidden /> {t("po_bill")}</Button>}
       </div>
       {canBillNow && <p className="text-xs text-soft">{t("po_bill_hint")}</p>}
@@ -112,6 +113,7 @@ export default function PurchaseDetail() {
       )}
 
       {dlg === "receive" && cid && <ReceiveDialog cid={cid} order={o} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_received_ok")); refresh(); }} />}
+      {dlg === "return" && cid && <ReturnDialog cid={cid} order={o} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_return_ok")); refresh(); }} />}
       {dlg === "pay" && cid && payBill && <PayDialog cid={cid} bill={payBill} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_pay_ok")); refresh(); }} />}
     </div>
   );
@@ -148,6 +150,36 @@ function ReceiveDialog({ cid, order, onClose, onDone }: { cid: string; order: Pu
         ))}
         {e && <ErrorBox message={e.text} reference={e.ref} />}
         <Button onClick={() => m.mutate()} disabled={!ok} loading={m.isPending} className="min-h-14 w-full">{t("po_confirm_receive")}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function ReturnDialog({ cid, order, onClose, onDone }: { cid: string; order: PurchaseOrder; onClose: () => void; onDone: () => void }) {
+  const { t } = useLang();
+  const keyFor = useIdempotencyKey();
+  const open = order.lines.filter((l) => l.received > 0.0001);
+  const [qty, setQty] = useState<Record<number, string>>({});
+  const [reason, setReason] = useState("");
+  const lines = open.filter((l) => Number(qty[l.id]) > 0).map((l) => ({ line_id: l.id, qty: Number(qty[l.id]) }));
+  const payload = { lines, reason: reason.trim() };
+  const m = useMutation({ mutationFn: () => api(`/connections/${cid}/purchasing/orders/${order.id}/return`, { body: payload, headers: { "Idempotency-Key": keyFor({ order: order.id, ...payload }) } }), onSuccess: onDone });
+  const e = msg(t, m.error);
+  const billed = (order.bills ?? []).some((b) => b.state === "posted");
+  return (
+    <Modal title={t("po_return_title")} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-soft">{t("po_return_hint")}{billed ? ` ${t("po_return_credit")}` : ""}</p>
+        {open.map((l) => (
+          <div key={l.id} className="space-y-2 rounded-2xl bg-surface2 p-3">
+            <div className="flex items-center justify-between gap-2"><span className="font-bold" dir="auto">{l.name}</span><span className="text-xs text-soft">{t("po_received")}: <b dir="ltr">{l.received}</b></span></div>
+            <input aria-label={t("po_qty")} type="number" inputMode="decimal" min="0" max={l.received} step="any" value={qty[l.id] ?? ""} onChange={(ev) => setQty({ ...qty, [l.id]: ev.target.value })} dir="ltr" className="min-h-12 w-28 rounded-xl border border-line bg-surface px-3 text-center text-lg font-bold" />
+          </div>
+        ))}
+        <label className="block text-sm font-bold">{t("po_return_reason")}
+          <input value={reason} maxLength={200} onChange={(ev) => setReason(ev.target.value)} className="mt-1.5 min-h-12 w-full rounded-2xl border border-line bg-surface px-4" /></label>
+        {e && <ErrorBox message={e.text} reference={e.ref} />}
+        <Button variant="danger" onClick={() => m.mutate()} disabled={!lines.length} loading={m.isPending} className="min-h-14 w-full">{t("po_return_confirm")}</Button>
       </div>
     </Modal>
   );

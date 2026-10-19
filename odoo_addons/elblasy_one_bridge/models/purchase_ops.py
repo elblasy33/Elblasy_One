@@ -343,6 +343,84 @@ class ElblasyBridgePurchase(models.AbstractModel):
         self._tag(f"rcpt_{key}", done_picking)
         return wire({"outcome": "created", "refs": {"order": self._po_view(self.env["purchase.order"].browse(po.id)), "picking": done_picking.name}})
 
+    # ---------------- returning goods to the supplier ----------------
+    @api.model
+    def purchase_return(self, op_id, key, spec):
+        """Send received goods back to the supplier. `lines` = [{line_id, qty}]. The stock leaves through
+        a real return transfer; when the order was already billed, a posted vendor credit note for the
+        returned value reduces what is owed. Returning more than was received is refused."""
+        self._require_internal_user()
+        self._need_purchase()
+        key = self._key(key)
+        existing = self._managed(f"ret_{key}")
+        if existing:
+            po = existing.purchase_id if "purchase_id" in existing._fields and existing.purchase_id else None
+            return wire({"outcome": "already_exists", "refs": {"order": self._po_view(po) if po else {"id": existing.id}}})
+        po = self.env["purchase.order"].browse(int(spec.get("order_id") or 0)).exists()
+        if not po or po.state not in ("purchase", "done"):
+            raise UserError("Only a confirmed order can have goods returned.")
+        wanted = {}
+        for item in spec.get("lines") or []:
+            lid = int(item.get("line_id") or 0)
+            wanted[lid] = wanted.get(lid, 0.0) + _num(item.get("qty"), "returned quantity", minimum=0.0001, maximum=1e7)
+        if not wanted:
+            raise UserError("Say how much of which line goes back.")
+        by_line = {l.id: l for l in po.order_line}
+        for lid, qty in wanted.items():
+            pol = by_line.get(lid)
+            if not pol:
+                raise UserError("A line does not belong to this order.")
+            if qty > pol.qty_received + TOLERANCE:
+                raise UserError(f"'{pol.product_id.display_name}': only {pol.qty_received:g} received, cannot return {qty:g}.")
+        left = dict(wanted)
+        first_return = None
+        for pk in po.picking_ids.filtered(lambda p: p.state == "done" and p.picking_type_code == "incoming").sorted("id"):
+            take = {}
+            for m in pk.move_ids.filtered(lambda m: m.state == "done" and m.purchase_line_id.id in left):
+                give = min(left[m.purchase_line_id.id], m.quantity)
+                if give > TOLERANCE:
+                    take[m.id] = give
+                    left[m.purchase_line_id.id] -= give
+            if not take:
+                continue
+            wiz = self.env["stock.return.picking"].with_context(active_id=pk.id, active_model="stock.picking").create({})
+            for ln in wiz.product_return_moves:
+                ln.quantity = take.get(ln.move_id.id, 0.0)
+            wiz.product_return_moves.filtered(lambda r: not r.quantity).unlink()
+            res = wiz.action_create_returns() if hasattr(wiz, "action_create_returns") else wiz.create_returns()
+            rp = self.env["stock.picking"].browse(res["res_id"])
+            for m in rp.move_ids:
+                m.quantity = m.product_uom_qty
+                m.picked = True
+            out = rp.with_context(skip_sms=True).button_validate()
+            if isinstance(out, dict) and out.get("res_model") == "stock.backorder.confirmation":
+                self.env["stock.backorder.confirmation"].with_context(**out.get("context", {})).create({"pick_ids": [(4, rp.id)]}).process_cancel_backorder()
+            elif isinstance(out, dict):
+                raise UserError("Odoo needs a manual step to finish this return; complete it in Odoo.")
+            if rp.state != "done":
+                raise UserError(f"The return did not complete (state: {rp.state}).")
+            first_return = first_return or rp
+        if not first_return or any(v > TOLERANCE for v in left.values()):
+            raise UserError("The returned goods could not be matched to received transfers.")
+        credit = None
+        billed = po.invoice_ids.filtered(lambda b: b.move_type == "in_invoice" and b.state == "posted")
+        if billed:
+            note_lines = []
+            for lid, qty in wanted.items():
+                pol = by_line[lid]
+                note_lines.append((0, 0, {"product_id": pol.product_id.id, "quantity": qty, "price_unit": pol.price_unit,
+                                          "purchase_line_id": pol.id, "tax_ids": [(6, 0, pol.tax_ids.ids if "tax_ids" in pol._fields else pol.taxes_id.ids)]}))  # fmt: skip
+            credit = self.env["account.move"].create({
+                "move_type": "in_refund", "partner_id": po.partner_id.id, "invoice_date": fields.Date.context_today(self),
+                "ref": f"Return {first_return.name}", "invoice_origin": po.name, "invoice_line_ids": note_lines,
+            })  # fmt: skip
+            credit.action_post()
+        self._tag(f"ret_{key}", first_return)
+        refs = {"order": self._po_view(self.env["purchase.order"].browse(po.id)), "picking": first_return.name}
+        if credit:
+            refs["credit_note"] = self._bill_brief(credit)
+        return wire({"outcome": "created", "refs": refs})
+
     # ---------------- vendor bills ----------------
     @api.model
     def purchase_create_bill(self, op_id, key, spec):
