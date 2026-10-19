@@ -49,6 +49,15 @@ class Step:
     existing: dict[str, Any] = field(default_factory=dict)
 
 
+MODULE_LABELS: dict[str, tuple[str, str]] = {
+    "account": ("المحاسبة", "Accounting"), "sale_management": ("المبيعات", "Sales"),
+    "purchase": ("المشتريات", "Purchasing"), "stock": ("المخزون", "Inventory"),
+    "stock_account": ("تقييم المخزون", "Inventory valuation"),
+    "point_of_sale": ("نقطة البيع", "Point of Sale"), "mrp": ("التصنيع", "Manufacturing"),
+    "product_expiry": ("تواريخ الصلاحية", "Expiry dates"), "barcodes": ("الباركود", "Barcodes"),
+}  # fmt: skip
+
+
 def _t(ar: str, en: str) -> dict[str, str]:
     return {"ar": ar, "en": en}
 
@@ -89,7 +98,8 @@ def build_plan(
             if isinstance(mods, dict) and "unavailable" not in mods
             else "unknown"
         )
-        s = Step(f"module_{m}", "install_module", _t(f"تفعيل تطبيق {m}", f"Install app {m}"),
+        s = Step(f"module_{m}", "install_module", _t(f"تفعيل: {MODULE_LABELS.get(m, (m, m))[0]}",
+                                                         f"Enable: {MODULE_LABELS.get(m, (m, m))[1]}"),
                  {"module": m}, "satisfied" if state == "installed" else "to_apply", True,
                  risk="medium", impact="Adds the app's menus, models and data to this database.",
                  recovery="Apps can be uninstalled in Odoo, but data created by them may be lost; "

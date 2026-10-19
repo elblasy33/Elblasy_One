@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/* Design tokens. Warm, friendly palette; dark mode follows the system. */
+:root {
+  --bg: #fbf7f0;
+  --surface: #ffffff;
+  --surface-2: #f4efe6;
+  --ink: #1d2433;
+  --ink-soft: #5b6578;
+  --line: #e7e0d3;
+  --brand: #0f8a78;
+  --brand-ink: #ffffff;
+  --brand-soft: #d9f2ec;
+  --accent: #f08a24;
+  --accent-soft: #fde9d2;
+  --ok: #178a4a;
+  --ok-soft: #dcf5e6;
+  --warn: #b7791f;
+  --warn-soft: #fcefd0;
+  --bad: #c2362f;
+  --bad-soft: #fbe1df;
+  --radius: 1.1rem;
+  --shadow: 0 1px 2px rgb(29 36 51 / 0.05), 0 8px 24px -12px rgb(29 36 51 / 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151d;
+    --surface: #1a2030;
+    --surface-2: #222a3d;
+    --ink: #eef1f7;
+    --ink-soft: #a3adc2;
+    --line: #2c3650;
+    --brand: #2bc4aa;
+    --brand-ink: #06231e;
+    --brand-soft: #14382f;
+    --accent: #ffa64d;
+    --accent-soft: #3a2a14;
+    --ok: #4cd08b;
+    --ok-soft: #123524;
+    --warn: #f0b84d;
+    --warn-soft: #3a2f12;
+    --bad: #ff7a72;
+    --bad-soft: #3d1b19;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brandink: var(--brand-ink);
+  --color-brandsoft: var(--brand-soft);
+  --color-accent: var(--accent);
+  --color-accentsoft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-oksoft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warnsoft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-badsoft: var(--bad-soft);
+  --font-sans: var(--font-cairo), ui-sans-serif, system-ui, sans-serif;
+  --radius-card: var(--radius);
+  --shadow-card: var(--shadow);
+}
+
+html, body { background: var(--bg); color: var(--ink); font-family: var(--font-cairo), system-ui, sans-serif; }
+* { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; border-radius: 0.5rem; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes pop { 0% { transform: scale(0.96); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+.rise { animation: rise 0.35s ease both; }
+.pop { animation: pop 0.25s ease both; }
+@media (prefers-reduced-motion: reduce) { .rise, .pop { animation: none; } }

@@ -1,0 +1,5 @@
+e2e/shots/
+e2e/.state.json
+test-results/
+playwright-report/
+.next/

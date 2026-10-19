@@ -53,10 +53,13 @@ def test_full_setup_executes_and_is_verified_independently(client, fresh):
     assert client.post(f"/connections/{cid}/setup/plans/{plan['id']}/execute").status_code == 409
     client.post(f"/connections/{cid}/setup/plans/{plan['id']}/approve")
     r = client.post(f"/connections/{cid}/setup/plans/{plan['id']}/execute")
-    assert r.status_code == 200, r.text
-    out = r.json()
-    assert out["status"] == "completed", out
-    assert out["verification"]["complete"] and out["verification"]["remaining_steps"] == []
+    assert r.status_code == 202, r.text
+    done = client.get(f"/connections/{cid}/setup/plans/{plan['id']}").json()
+    assert done["status"] == "completed", (
+        done["plan_status_debug"] if "plan_status_debug" in done else done["execution"]
+    )
+    ex = done["execution"]
+    assert ex["verification"]["complete"] and ex["verification"]["remaining_steps"] == []
 
     # independent evidence straight from Odoo (not via the bridge's own answers)
     c = rpc(url, db)

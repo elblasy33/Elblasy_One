@@ -1,19 +1,20 @@
 import json
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from elblasy_api import audit
 from elblasy_api.config import Settings, get_settings
-from elblasy_api.db import get_session
+from elblasy_api.db import get_engine, get_session
 from elblasy_api.deps import api_error, current_user, get_vault, require
-from elblasy_api.models import OdooConnection, SetupPlan, User
-from elblasy_api.odoo.client import OdooError
+from elblasy_api.models import AuditEvent, OdooConnection, SetupPlan, User
+from elblasy_api.odoo.client import BridgeClient, OdooError
 from elblasy_api.routers.connections import _apply_manifest, _client, _owned
 from elblasy_api.security.rbac import P_CONFIG, Role
 from elblasy_api.security.vault import SecretVault
@@ -79,7 +80,7 @@ def _plan_out(p: SetupPlan) -> dict[str, Any]:
         "id": str(p.id), "connection_id": str(p.connection_id), "status": p.status,
         "template": {"id": p.template_id, "version": p.template_version},
         "plan_hash": p.plan_hash, "approvals": p.approvals, "created_at": p.created_at,
-        "plan": p.plan,
+        "updated_at": p.updated_at, "plan": p.plan, "execution": p.execution,
     }  # fmt: skip
 
 
@@ -230,21 +231,65 @@ def approve_plan(
     return _plan_out(p)
 
 
-@router.post("/connections/{cid}/setup/plans/{pid}/execute")
+STALE_EXECUTION = timedelta(minutes=10)
+log = logging.getLogger("elblasy.setup")
+
+
+def _run_in_background(
+    plan_id: uuid.UUID, actor_id: uuid.UUID, client: BridgeClient, cid_hdr: str | None
+) -> None:
+    """Own session: the request that started this has already returned."""
+    with sessionmaker(get_engine(), expire_on_commit=False)() as db:
+        p = db.get(SetupPlan, plan_id)
+        if p is None:
+            return
+        try:
+            result = execute_plan(db, p, actor_id, client)
+            outcome = "success" if result["status"] == "completed" else "failure"
+            after: dict[str, Any] = {"status": result["status"],
+                                     "steps": {k: v["status"] for k, v in result["steps"].items()}}  # fmt: skip
+        except DriftError as exc:
+            db.rollback()
+            p = db.get(SetupPlan, plan_id)
+            assert p is not None  # noqa: S101
+            p.status, outcome, after = "needs_review", "failure", {"error": "plan_drift"}
+            p.execution = {
+                **(p.execution or {}),
+                "error": str(exc),
+                "finished_at": datetime.now(UTC).isoformat(),
+            }
+        except Exception:  # noqa: BLE001 - never leave a plan stuck in "executing"
+            log.exception("setup execution crashed cid=%s", cid_hdr)
+            db.rollback()
+            p = db.get(SetupPlan, plan_id)
+            assert p is not None  # noqa: S101
+            p.status, outcome, after = "needs_review", "failure", {"error": "internal"}
+            p.execution = {**(p.execution or {}), "error": "Execution stopped unexpectedly; "
+                           "re-run to resume (steps are idempotent).",
+                           "finished_at": datetime.now(UTC).isoformat()}  # fmt: skip
+        db.add(AuditEvent(tenant_id=p.tenant_id, actor_id=actor_id, action="setup.execute.finish",
+                          outcome=outcome, target_type="setup_plan", target_id=str(p.id),
+                          after=after, correlation_id=cid_hdr))  # fmt: skip
+        db.commit()
+
+
+@router.post("/connections/{cid}/setup/plans/{pid}/execute", status_code=202)
 def execute(
     cid: uuid.UUID,
     pid: uuid.UUID,
     request: Request,
+    background: BackgroundTasks,
     user: User = Depends(require(P_CONFIG)),
     db: Session = Depends(get_session),
     s: Settings = Depends(get_settings),
     vault: SecretVault = Depends(get_vault),
 ) -> dict[str, Any]:
-    """Applies an approved plan, then verifies it from a fresh read of Odoo.
-    Safe to call again after a failure or timeout: finished steps are skipped and the rest are
-    idempotent. Synchronous for now (module installs can take ~1 minute)."""
+    """Starts execution in the background and returns at once; poll the plan for live step
+    status. Safe to call again after a failure or timeout: finished steps are skipped and the rest
+    are idempotent. A run stuck in `executing` for >10 min is treated as dead and may be resumed."""
     p = _get_plan(db, user, cid, pid)
-    if p.status not in ("approved", "failed", "needs_review"):
+    stale = p.status == "executing" and datetime.now(UTC) - p.updated_at > STALE_EXECUTION
+    if p.status not in ("approved", "failed", "needs_review") and not stale:
         raise api_error(409, "plan_not_approved", f"Plan is {p.status}; approve it first")
     approved = {a["role"] for a in p.approvals if a["plan_hash"] == p.plan_hash}
     if not set(p.plan["required_approvals"]) <= approved:
@@ -253,21 +298,11 @@ def execute(
     if c.status != "active" or c.secret_ciphertext is None:
         raise api_error(409, "connection_revoked", "Connection is revoked")
     client = _client(c.base_url, c.db_name, c.login, vault.decrypt(c.secret_ciphertext), s)
+    p.status = "executing"
     audit.record(db, request, action="setup.execute.start", outcome="success", actor=user,
                  target_type="setup_plan", target_id=p.id, after={"hash": p.plan_hash})  # fmt: skip
     db.commit()
-    try:
-        result = execute_plan(db, p, user.id, client)
-    except DriftError as exc:
-        raise api_error(409, "plan_drift", str(exc)) from exc
-    except OdooError as exc:
-        p.status = "needs_review"
-        db.commit()
-        raise api_error(502, "odoo_unavailable", str(exc)) from exc
-    audit.record(db, request, action="setup.execute.finish",
-                 outcome="success" if result["status"] == "completed" else "failure", actor=user,
-                 target_type="setup_plan", target_id=p.id,
-                 after={"status": result["status"],
-                        "steps": {k: v["status"] for k, v in result["steps"].items()}})  # fmt: skip
-    db.commit()
-    return {"id": str(p.id), **result}
+    background.add_task(
+        _run_in_background, p.id, user.id, client, getattr(request.state, "correlation_id", None)
+    )
+    return {"id": str(p.id), "status": "executing"}
