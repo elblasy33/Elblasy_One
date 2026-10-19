@@ -76,6 +76,8 @@ test("audit log, operations, readiness details and alerts are visible to the own
 
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "تنبيهات تحتاج انتباهك" })).toBeVisible();
+  await expect(page.getByText("مبيعات آخر ٧ أيام")).toBeVisible();
+  await expect(page.getByText("الأكثر مبيعًا")).toBeVisible();
   await page.screenshot({ path: "e2e/shots/63-today-alerts.png", fullPage: true });
 });
 

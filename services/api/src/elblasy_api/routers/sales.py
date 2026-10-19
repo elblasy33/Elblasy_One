@@ -387,3 +387,20 @@ def summary(
         "source": "Odoo pos.order / pos.payment, read live",
     }
     return out
+
+
+@router.get("/insights")
+def insights(
+    cid: uuid.UUID, days: int = Query(7, ge=1, le=31),
+    user: User = Depends(require(P_REPORTS)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    """A week of sales, best sellers, slow-moving stock and goods near expiry, from Odoo, read live."""
+    _, client = _conn(db, user, cid, s, vault)
+    out = _read(client, "insights_snapshot", days)
+    out["definition"] = {
+        "sales_by_day": "Paid POS orders per local day, tax included, refunds subtracted",
+        "slow_moving": "In stock but not sold at the till in the last 30 days, ranked by stock value",
+        "expiring": "Lots with stock that expire within 30 days (or already have)",
+    }
+    return out

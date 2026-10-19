@@ -1,7 +1,7 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Connection, Me, Plan, PlanListItem, ProductPage, Readiness } from "./types";
+import type { Connection, Me, InsightsData, Plan, PlanListItem, ProductPage, Readiness } from "./types";
 
 export const useMe = () => useQuery({ queryKey: ["me"], queryFn: () => api<Me>("/auth/me"), retry: false, staleTime: 60_000 });
 export const useConnections = (enabled = true) =>
@@ -100,3 +100,6 @@ export const useCustomerStatement = (cid?: string, id?: number) =>
 
 export const useCategories = (cid: string | undefined) =>
   useQuery({ queryKey: ["categories", cid], queryFn: () => api<{ items: string[] }>(`/connections/${cid}/catalog/categories`), enabled: !!cid, staleTime: 60_000 });
+
+export const useInsights = (cid: string | undefined) =>
+  useQuery({ queryKey: ["insights", cid], queryFn: () => api<InsightsData>(`/connections/${cid}/sales/insights?days=7`), enabled: !!cid, staleTime: 60_000 });

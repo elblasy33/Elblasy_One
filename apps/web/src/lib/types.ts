@@ -131,3 +131,10 @@ export interface Receivables { total: number; customers: number; top: { name: st
 
 export interface Recipe { template_id: number; name: string; yield: number; uom: string; on_hand: number; can_make: number; components: { template_id: number; name: string; per_unit: number; on_hand: number; uom: string }[] }
 export interface ProductionRun { id: number; name: string; state: string; product: string; qty: number; qty_produced: number }
+
+export interface InsightsData {
+  currency: string; days: number; sales_by_day: { day: string; net: number }[];
+  top_products: { name: string; qty: number; amount: number }[];
+  slow_moving?: { days: number; count: number; items: { product_id: number; name: string; qty: number; value: number }[] };
+  expiring?: { days: number; count: number; items: { product: string; lot: string; qty: number; expires: string; expired: boolean }[] };
+}

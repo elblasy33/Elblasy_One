@@ -1,8 +1,9 @@
 "use client";
-import { ArrowLeft, ArrowRight, BadgeDollarSign, CheckCircle2, HandCoins, PackageMinus, PlugZap, ShieldCheck, Wallet, Wrench } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeDollarSign, CheckCircle2, HandCoins, PackageMinus, PlugZap, ShieldCheck, Users, Wallet, Wrench } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AlertsPanel } from "@/components/alerts-panel";
+import { Insights } from "@/components/insights";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useLang } from "@/lib/i18n";
@@ -109,7 +110,9 @@ export default function TodayPage() {
         <Kpi icon={<Wallet className="size-6" aria-hidden />} label={t("kpi_cash_net")} value={day.data ? `${money(day.data.cash_collected)} ${day.data.currency}` : undefined} note={day.data ? `${t("kpi_def")}: ${t("kpi_cash_def")}` : undefined} />
         <Kpi icon={<PackageMinus className="size-6" aria-hidden />} label={t("kpi_stock")} value={lowCount.data ? String(lowCount.data.total) : undefined} note={lowCount.data ? t("st_min_hint") : undefined} />
         <Kpi icon={<HandCoins className="size-6" aria-hidden />} label={t("kpi_payables")} value={moneyOv.data ? `${money(moneyOv.data.payables.total)} ${moneyOv.data.currency}` : undefined} note={moneyOv.data ? t("mn_payables_def") : undefined} />
+        {moneyOv.data?.receivables && <Kpi icon={<Users className="size-6" aria-hidden />} label={t("cu_receivables")} value={`${money(moneyOv.data.receivables.total)} ${moneyOv.data.currency}`} note={moneyOv.data.receivables.overdue.count ? `${t("cu_overdue")}: ${moneyOv.data.receivables.overdue.count}` : undefined} />}
       </section>
+      {canReport && conn && <Insights cid={conn.id} />}
     </div>
   );
 }
