@@ -91,3 +91,54 @@ def test_duplicate_name_conflict(client, target):
     _, url, db = target
     assert client.post("/connections", json=body(url, db, name="Dup")).status_code == 201
     assert client.post("/connections", json=body(url, db, name="Dup")).status_code == 409
+
+
+def _fingerprint(url, db):
+    """Max write_date / counts on configuration-bearing models, via direct RPC."""
+    import xmlrpc.client as x
+
+    uid = x.ServerProxy(url + "/xmlrpc/2/common").authenticate(db, "admin", "admin", {})
+    m = x.ServerProxy(url + "/xmlrpc/2/object", allow_none=True)
+    out = {}
+    for model in ("res.company", "account.journal", "account.tax", "product.template",
+                  "stock.warehouse", "pos.config", "ir.config_parameter", "account.move"):  # fmt: skip
+        rows = m.execute_kw(db, uid, "admin", model, "search_read", [[]],
+                            {"fields": ["write_date"], "order": "write_date desc", "limit": 1})  # fmt: skip
+        out[model] = (m.execute_kw(db, uid, "admin", model, "search_count", [[]]),
+                      rows[0]["write_date"] if rows else None)  # fmt: skip
+    return out
+
+
+def test_readiness_scan_is_read_only_and_reports_real_state(client, target):
+    series, url, db = target
+    cid = client.post("/connections", json=body(url, db)).json()["id"]
+    before = _fingerprint(url, db)
+    r = client.get(f"/connections/{cid}/readiness")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert _fingerprint(url, db) == before  # nothing changed in Odoo
+    assert data["read_only"] and data["environment"] == "new_installation"
+    ids = {f["id"] for f in data["findings"]}
+    assert "POS-001" in ids  # fresh DB has POS installed but no POS configured
+    assert not any(f["classification"] == "unable_to_verify" for f in data["findings"])
+    for f in data["findings"]:
+        assert f["verification"] and f["recommended_action"] and f["required_permission"]
+    with get_engine().connect() as conn:
+        n = conn.execute(
+            text(
+                "select count(*) from audit_events where action='readiness.scan' and outcome='success'"
+            )
+        ).scalar()
+    assert n >= 1
+
+
+def test_readiness_requires_permission(client, target):
+    _, url, db = target
+    cid = client.post("/connections", json=body(url, db, name="R")).json()["id"]
+    client.post(
+        "/users",
+        json={"email": "cash@example.com", "password": "cashier-password-1", "role": "cashier"},
+    )
+    cash = TestClient(create_app())
+    cash.post("/auth/login", json={"email": "cash@example.com", "password": "cashier-password-1"})
+    assert cash.get(f"/connections/{cid}/readiness").status_code == 403

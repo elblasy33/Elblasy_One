@@ -15,7 +15,13 @@ from elblasy_api.deps import api_error, get_vault, require
 from elblasy_api.models import OdooConnection, User
 from elblasy_api.odoo.client import BridgeClient, OdooCredentials, OdooError
 from elblasy_api.odoo.compat import assess
-from elblasy_api.security.rbac import P_CONNECTIONS
+from elblasy_api.readiness.engine import (
+    RULESET_VERSION,
+    classify_environment,
+    evaluate,
+    summarize,
+)
+from elblasy_api.security.rbac import P_CONFIG, P_CONNECTIONS
 from elblasy_api.security.ssrf import UnsafeUrlError, validate_odoo_url
 from elblasy_api.security.vault import SecretVault
 
@@ -168,6 +174,46 @@ def health(
         "odoo_series": c.odoo_series, "odoo_edition": c.odoo_edition,
         "checked_at": c.last_health_ok_at,
     }  # fmt: skip
+
+
+@router.get("/{cid}/readiness")
+def readiness(
+    cid: uuid.UUID,
+    request: Request,
+    user: User = Depends(require(P_CONFIG)),
+    db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings),
+    vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:
+    """Read-only diagnostic scan. Refreshes the capability manifest; changes nothing in Odoo."""
+    c = _owned(db, user, cid)
+    if c.status != "active" or c.secret_ciphertext is None:
+        raise api_error(409, "connection_revoked", "Connection is revoked")
+    client = _client(c.base_url, c.db_name, c.login, vault.decrypt(c.secret_ciphertext), s)
+    try:
+        manifest = client.call_bridge("capabilities")
+        snapshot = client.call_bridge("readiness_snapshot")
+    except OdooError as exc:
+        audit.record(db, request, action="readiness.scan", outcome="failure", actor=user,
+                     target_type="connection", target_id=c.id)  # fmt: skip
+        db.commit()
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+    _apply_manifest(c, manifest)
+    findings = evaluate(manifest, snapshot)
+    summary = summarize(findings)
+    env = classify_environment(manifest, snapshot)
+    audit.record(db, request, action="readiness.scan", outcome="success", actor=user,
+                 target_type="connection", target_id=c.id,
+                 after={"environment": env.value, **summary})  # fmt: skip
+    db.commit()
+    return {
+        "ruleset_version": RULESET_VERSION,
+        "scanned_at": datetime.now(UTC),
+        "read_only": True,
+        "environment": env.value,
+        "summary": summary,
+        "findings": [f.to_dict() for f in findings],
+    }
 
 
 @router.put("/{cid}/credentials")

@@ -10,7 +10,7 @@ from typing import Any
 
 from elblasy_api.security.ssrf import ValidatedUrl
 
-ALLOWED_BRIDGE_METHODS = frozenset({"ping", "capabilities"})
+ALLOWED_BRIDGE_METHODS = frozenset({"ping", "capabilities", "readiness_snapshot"})
 
 
 class OdooError(Exception):
