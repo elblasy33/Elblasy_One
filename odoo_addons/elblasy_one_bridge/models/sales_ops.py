@@ -92,6 +92,20 @@ class ElblasyBridgeSales(models.AbstractModel):
             "amount_paid": o.amount_paid,
             "amount_return": abs(o.amount_return),
             "refund_of": o.lines.mapped("refunded_orderline_id.order_id")[:1].id or None,
+            "partner_id": o.partner_id.id or None,
+            "partner": o.partner_id.name or None,
+            "invoice": (
+                {
+                    "id": o.account_move.id,
+                    "name": o.account_move.name,
+                    "state": o.account_move.state,
+                    "payment_state": o.account_move.payment_state,
+                    "amount_residual": o.account_move.amount_residual,
+                }
+                if o.account_move
+                else None
+            ),
+            "credit_amount": sum(p.amount for p in o.payment_ids if p.payment_method_id.split_transactions),
             "lines": [
                 {
                     "id": l.id,
@@ -111,6 +125,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "method": p.payment_method_id.name,
                     "amount": p.amount,
                     "is_change": bool(p.is_change),
+                    "is_credit": bool(p.payment_method_id.split_transactions),
                 }
                 for p in o.payment_ids
             ],
@@ -132,7 +147,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "name": c.name,
                     "session": self._session_view(s) if s else None,
                     "payment_methods": [
-                        {"id": m.id, "name": m.name, "is_cash": bool(m.is_cash_count)}
+                        {"id": m.id, "name": m.name, "is_cash": bool(m.is_cash_count), "is_credit": bool(m.split_transactions)}
                         for m in c.payment_method_ids
                     ],
                 }
@@ -376,19 +391,33 @@ class ElblasyBridgeSales(models.AbstractModel):
         if not 1 <= len(pays) <= 5:
             raise UserError("A sale needs 1-5 payments.")
         methods = cfg.payment_method_ids
-        paid_cash = paid_other = 0.0
+        paid_cash = paid_other = credit_amt = 0.0
         pay_vals = []
         for p in pays:
             pm = methods.filtered(lambda m, pid=int(p.get("payment_method_id") or 0): m.id == pid)
             if not pm:
                 raise UserError("Payment method is not available on this point of sale.")
             amt = _num(p.get("amount"), "payment amount", minimum=0.01)
-            if pm.is_cash_count:
+            if pm.split_transactions:
+                credit_amt += amt
+            elif pm.is_cash_count:
                 paid_cash += amt
             else:
                 paid_other += amt
             pay_vals.append({"payment_method_id": pm.id, "amount": amt, "payment_date": fields.Datetime.now()})
-        paid = paid_cash + paid_other
+        paid = paid_cash + paid_other + credit_amt
+        if credit_amt > 0:
+            if not partner:
+                raise UserError("CUSTOMER_REQUIRED: choose the customer for a sale on credit.")
+            if credit_amt > total + TOLERANCE:
+                raise UserError("The credit amount cannot be more than the total.")
+            limit = partner.credit_limit if "credit_limit" in partner._fields else 0.0
+            if limit and limit > 0 and not spec.get("credit_override"):
+                balance = self._customer_balance(partner)
+                if balance + credit_amt > limit + TOLERANCE:
+                    raise UserError(
+                        f"CREDIT_LIMIT_EXCEEDED: the customer owes {balance}; adding {credit_amt} passes the limit {limit}."
+                    )
         if paid + TOLERANCE < total:
             raise UserError(f"Payments ({paid}) do not cover the total ({total}).")
         change = round(paid - total, cfg.currency_id.decimal_places)
@@ -410,7 +439,7 @@ class ElblasyBridgeSales(models.AbstractModel):
             "amount_tax": tax,
             "amount_return": change * self._change_sign(),
             "partner_id": partner.id if partner else False,
-            "to_invoice": False,
+            "to_invoice": credit_amt > 0,  # the credit part becomes an open invoice for the customer
             "sequence_number": 1,
             "lines": [
                 [0, 0, {
@@ -456,6 +485,10 @@ class ElblasyBridgeSales(models.AbstractModel):
             raise UserError("Only a paid sale can be refunded.")
         if orig.lines.mapped("refund_orderline_ids"):  # computed field `refunded_order_id` is not searchable
             raise UserError("This sale was already refunded.")
+        if orig.account_move:
+            raise UserError(
+                "This sale has an invoice (a credit sale). Refunding it needs a credit note in Odoo; it cannot be refunded here."
+            )
         session = orig.config_id.current_session_id
         if not session or session.state != "opened":
             raise UserError("Open the cash register to give a refund.")

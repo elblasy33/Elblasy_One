@@ -91,3 +91,9 @@ export const useAlerts = (enabled = true) =>
 export const useUsers = (enabled = true) => useQuery({ queryKey: ["users"], queryFn: () => api<MeUser[]>("/users"), enabled });
 export const useAudit = (qs: string) => useQuery({ queryKey: ["audit", qs], queryFn: () => api<{ total: number; items: AuditItem[] }>(`/audit?${qs}`), placeholderData: (p) => p });
 export const useOperations = (qs: string) => useQuery({ queryKey: ["operations", qs], queryFn: () => api<{ total: number; items: OperationItem[] }>(`/operations?${qs}`), placeholderData: (p) => p });
+
+import type { Customer, CustomerStatement } from "./types";
+export const useCustomers = (cid: string | undefined, q: string) =>
+  useQuery({ queryKey: ["customers", cid, q], queryFn: () => api<{ total: number; items: Customer[] }>(`/connections/${cid}/customers?q=${encodeURIComponent(q)}&limit=30`), enabled: !!cid, placeholderData: (p) => p });
+export const useCustomerStatement = (cid?: string, id?: number) =>
+  useQuery({ queryKey: ["customer-statement", cid, id], queryFn: () => api<CustomerStatement>(`/connections/${cid}/customers/${id}/statement`), enabled: !!cid && !!id });

@@ -11,6 +11,7 @@ export function Receipt({ r, currency }: { r: ReceiptData; currency: string }) {
       <p className="text-center text-lg font-black">{r.company ?? t("app")}</p>
       <p className="mt-1 text-center text-xs" dir="ltr">{r.date}</p>
       <p className="text-center text-xs">{t("rcpt_ref")}: <span dir="ltr">{r.reference}</span></p>
+      {r.customer && <p className="text-center text-xs">{t("pos_customer")}: <span dir="auto">{r.customer}</span></p>}
       <p className="text-center text-xs">{t("rcpt_cashier")}: <span dir="ltr">{r.cashier}</span></p>
       <hr className="my-2 border-dashed border-black/40" />
       <ul className="space-y-1">
@@ -25,6 +26,7 @@ export function Receipt({ r, currency }: { r: ReceiptData; currency: string }) {
       <p className="flex justify-between text-base font-black"><span>{t("pos_total")}</span><span dir="ltr">{money(r.total)} {currency}</span></p>
       <p className="flex justify-between text-xs"><span>{t("pos_tax")}</span><span dir="ltr">{money(r.tax)}</span></p>
       {r.payments.map((p, i) => <p key={i} className="flex justify-between"><span>{p.method}</span><span dir="ltr">{money(p.amount)}</span></p>)}
+      {!!r.on_account && <p className="flex justify-between font-bold"><span>{t("pos_credit_note")}</span><span dir="ltr">{money(r.on_account)}</span></p>}
       <p className="flex justify-between"><span>{t("rcpt_paid")}</span><span dir="ltr">{money(r.paid)}</span></p>
       <p className="flex justify-between font-bold"><span>{t("rcpt_change")}</span><span dir="ltr">{money(r.change)}</span></p>
       <p className="mt-3 text-center text-xs">{t("rcpt_thanks")}</p>

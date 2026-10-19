@@ -1,8 +1,9 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CheckCircle2, History, Lock, Minus, Percent, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, XCircle } from "lucide-react";
+import { Banknote, CheckCircle2, History, Lock, Minus, Percent, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { CustomerPicker } from "@/components/customer-picker";
 import { money, Receipt } from "@/components/receipt";
 import { Badge, Button, Card, ErrorBox, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
@@ -11,7 +12,7 @@ import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
-import type { CloseResult, PosConfig, Quote, SaleProduct, SaleResult, SalesState } from "@/lib/types";
+import type { CloseResult, Customer, PosConfig, Quote, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
 interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number }
 type Tab = "register" | "history";
@@ -86,6 +87,8 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const [result, setResult] = useState<SaleResult | null>(null);
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState<CloseResult | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [pickingCustomer, setPickingCustomer] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
   const canDiscount = !!me.data?.permissions.includes("sales.discount");
 
@@ -125,7 +128,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   };
   const setQty = (id: number, qty: number) => setCart((c) => c.map((x) => (x.product_id === id ? { ...x, qty: Math.max(0.001, Math.round(qty * 1000) / 1000) } : x)));
   const remove = (id: number) => setCart((c) => c.filter((x) => x.product_id !== id));
-  const newSale = () => { setResult(null); setCart([]); setScan(""); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["sales-summary", cid] }); };
+  const newSale = () => { setResult(null); setCart([]); setCustomer(null); setScan(""); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["sales-summary", cid] }); };
   const stale = quote.isPlaceholderData || quote.isFetching; // never show a total that no longer matches the cart
   const qLine = (id: number) => (stale ? undefined : quote.data?.lines.find((l) => l.product_id === id));
   const total = quote.data?.total ?? 0;
@@ -193,6 +196,11 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
           </section>
 
           <aside className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            {cfg.payment_methods.some((m) => m.is_credit) && (
+              <button onClick={() => setPickingCustomer(true)} className="flex min-h-12 w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 font-bold hover:bg-surface2">
+                <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}</span>
+              </button>
+            )}
             <Card className="space-y-3 p-4">
               {cart.length === 0 ? <p className="py-6 text-center text-soft">{t("pos_empty_cart")}</p> : (
                 <ul className="divide-y divide-line">
@@ -235,9 +243,10 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
       )}
 
       {paying && quote.data && (
-        <PayDialog cid={cid} cfg={cfg} cart={cart} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
+        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
           onDone={(r) => { setPaying(false); setResult(r); }} onRefresh={() => void quote.refetch()} />
       )}
+      {pickingCustomer && <CustomerPicker cid={cid} onPick={(c) => { setCustomer(c); setPickingCustomer(false); }} onClose={() => setPickingCustomer(false)} />}
       {closing && <CloseDialog cid={cid} session={session} dec={dec} currency={state.currency} onClose={() => setClosing(false)} onDone={(r) => { setClosing(false); setClosed(r); }} />}
     </div>
   );
@@ -255,46 +264,73 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function PayDialog({ cid, cfg, cart, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
+function PayDialog({ cid, cfg, cart, customer, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
   const { t } = useLang();
   const keyFor = useIdempotencyKey();
-  const methods = cfg.payment_methods;
-  const [method, setMethod] = useState(methods.find((m) => m.is_cash)?.id ?? methods[0]?.id ?? 0);
-  const isCash = methods.find((m) => m.id === method)?.is_cash ?? true;
+  const normal = cfg.payment_methods.filter((m) => !m.is_credit);
+  const creditMethod = cfg.payment_methods.find((m) => m.is_credit);
+  const [method, setMethod] = useState(normal.find((m) => m.is_cash)?.id ?? normal[0]?.id ?? 0);
+  const isCash = normal.find((m) => m.id === method)?.is_cash ?? true;
   const [tendered, setTendered] = useState("");
-  const paid = isCash ? Number(tendered || 0) : total;
-  const change = Math.max(0, Math.round((paid - total) * 100) / 100);
-  const ok = method > 0 && paid + 0.004 >= total;
-  const quick = [...new Set([Math.ceil(total), Math.ceil(total / 5) * 5, Math.ceil(total / 10) * 10, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 200) * 200])].filter((v) => v >= total).slice(0, 5);
-  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount })), expected_total: total, payments: [{ payment_method_id: method, amount: paid }] };
+  const [onCredit, setOnCredit] = useState(false);
+  const [creditStr, setCreditStr] = useState("");
+  const [override, setOverride] = useState(false);
+  const credit = onCredit ? Math.min(total, Math.max(0, Number(creditStr === "" ? total : creditStr))) : 0;
+  const due = Math.round((total - credit) * 100) / 100; // what is paid now
+  const paid = due <= 0 ? 0 : isCash ? Number(tendered || 0) : due;
+  const change = Math.max(0, Math.round((paid - due) * 100) / 100);
+  const creditOk = !onCredit || (!!customer && credit > 0);
+  const ok = method > 0 && creditOk && (due <= 0 || paid + 0.004 >= due);
+  const quick = [...new Set([Math.ceil(due), Math.ceil(due / 5) * 5, Math.ceil(due / 10) * 10, Math.ceil(due / 50) * 50, Math.ceil(due / 100) * 100, Math.ceil(due / 200) * 200])].filter((v) => v >= due && v > 0).slice(0, 5);
+  const payments = [
+    ...(due > 0 ? [{ payment_method_id: method, amount: paid }] : []),
+    ...(onCredit && creditMethod ? [{ payment_method_id: creditMethod.id, amount: credit }] : []),
+  ];
+  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount })), expected_total: total, payments, ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
     mutationFn: () => api<SaleResult>(`/connections/${cid}/sales/orders`, { body: payload, headers: { "Idempotency-Key": keyFor(payload) } }),
     onSuccess: onDone,
     onError: (e) => { if (e instanceof ApiError && e.code === "price_changed") onRefresh(); },
   });
   const e = errMsg(t, m.error);
+  const limitHit = m.error instanceof ApiError && m.error.code === "credit_limit_exceeded";
   return (
     <Modal title={t("pay_title")} onClose={onClose}>
       <div className="space-y-4">
         <p className="flex items-baseline justify-between text-3xl font-black"><span>{t("pos_total")}</span><span dir="ltr">{money(total, dec)} <span className="text-base">{currency}</span></span></p>
-        {methods.length > 1 && (
-          <div role="radiogroup" aria-label={t("pay_method")} className="flex flex-wrap gap-2">
-            {methods.map((mm) => <button key={mm.id} role="radio" aria-checked={method === mm.id} onClick={() => setMethod(mm.id)} className={cn("min-h-11 rounded-2xl border-2 px-4 font-bold", method === mm.id ? "border-brand bg-brandsoft" : "border-line")}>{mm.name}</button>)}
+        {customer && <p className="text-sm text-soft">{t("pos_customer")}: <b dir="auto">{customer.name}</b></p>}
+        {creditMethod && (
+          <div className="space-y-2 rounded-2xl bg-surface2 p-3">
+            <button type="button" role="switch" aria-checked={onCredit} onClick={() => setOnCredit(!onCredit)} className={cn("flex min-h-12 w-full items-center justify-between rounded-xl border-2 px-3 font-bold", onCredit ? "border-brand bg-brandsoft" : "border-line bg-surface")}>{t("pos_on_credit")}<span aria-hidden>{onCredit ? "✓" : ""}</span></button>
+            {onCredit && !customer && <p role="alert" className="text-sm font-bold text-bad">{t("pos_credit_needs_customer")}</p>}
+            {onCredit && (
+              <label className="block text-sm font-bold">{t("pos_credit_part")}
+                <input type="number" inputMode="decimal" min="0" max={total} step="0.01" value={creditStr === "" ? String(total) : creditStr} onChange={(ev) => setCreditStr(ev.target.value)} dir="ltr" className="mt-1.5 min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-center text-xl font-black" /></label>
+            )}
           </div>
         )}
-        {isCash && (
+        {due > 0 && normal.length > 1 && (
+          <div role="radiogroup" aria-label={t("pay_method")} className="flex flex-wrap gap-2">
+            {normal.map((mm) => <button key={mm.id} role="radio" aria-checked={method === mm.id} onClick={() => setMethod(mm.id)} className={cn("min-h-11 rounded-2xl border-2 px-4 font-bold", method === mm.id ? "border-brand bg-brandsoft" : "border-line")}>{mm.name}</button>)}
+          </div>
+        )}
+        {due > 0 && isCash && (
           <>
+            {onCredit && <p className="flex justify-between font-bold"><span>{t("pos_cash_part")}</span><span dir="ltr">{money(due, dec)}</span></p>}
             <label className="block text-sm font-bold">{t("pay_tendered")}
               <input autoFocus type="number" inputMode="decimal" min="0" step="0.01" value={tendered} onChange={(ev) => setTendered(ev.target.value)} dir="ltr" className="mt-1.5 min-h-14 w-full rounded-2xl border border-line bg-surface px-4 text-center text-3xl font-black outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
             </label>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => setTendered(String(total))} className="min-h-11 rounded-2xl bg-brandsoft px-4 font-bold text-brand">{t("pay_exact")}</button>
+              <button onClick={() => setTendered(String(due))} className="min-h-11 rounded-2xl bg-brandsoft px-4 font-bold text-brand">{t("pay_exact")}</button>
               {quick.map((q) => <button key={q} onClick={() => setTendered(String(q))} className="min-h-11 rounded-2xl bg-surface2 px-4 font-bold" dir="ltr">{q}</button>)}
             </div>
             <p className={cn("flex items-baseline justify-between text-xl font-black", ok ? "text-ok" : "text-soft")}><span>{ok ? t("pay_change") : t("pay_short")}</span>{ok && <span dir="ltr">{money(change, dec)}</span>}</p>
           </>
         )}
         {e && <ErrorBox message={e.text} reference={e.ref} />}
+        {limitHit && canOverride && (
+          <label className="flex items-start gap-3 rounded-2xl bg-warnsoft p-3 text-sm font-bold text-warn"><input type="checkbox" checked={override} onChange={(ev) => setOverride(ev.target.checked)} className="mt-0.5 size-5" /><span>{t("pos_override")}<span className="block text-xs font-normal">{t("pos_override_hint")}</span></span></label>
+        )}
         <Button onClick={() => m.mutate()} disabled={!ok} loading={m.isPending} className="min-h-14 w-full text-lg">{t("pay_confirm")}</Button>
       </div>
     </Modal>

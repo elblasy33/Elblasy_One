@@ -137,13 +137,15 @@ class ElblasyBridgeReadiness(models.AbstractModel):
                         "name": c.name,
                         "payment_methods": len(c.payment_method_ids),
                         "has_cash_method": any(m.is_cash_count for m in c.payment_method_ids),
+                        "has_credit_method": any(m.split_transactions for m in c.payment_method_ids),
                         "has_open_session": bool(c.has_active_session),
                         "has_journal": bool(c.journal_id),
                     }
                     for c in env["pos.config"].search([])
                 ],
                 "payment_methods": [
-                    {"name": m.name, "type": m.type, "is_cash_count": bool(m.is_cash_count)}
+                    {"name": m.name, "type": m.type, "is_cash_count": bool(m.is_cash_count),
+                     "is_credit": bool(m.split_transactions)}
                     for m in methods
                 ],
                 "open_sessions": env["pos.session"].search_count([("state", "!=", "closed")]),

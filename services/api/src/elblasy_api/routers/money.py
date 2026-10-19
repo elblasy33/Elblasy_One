@@ -407,7 +407,8 @@ def overview(
     base = _read(client, "money_overview")
     d_from, d_to = _month()
     exp = _read(client, "expense_summary", d_from, d_to)
-    return {**base, "expenses_month": exp,
+    recv = _read(client, "receivables_overview")
+    return {**base, "expenses_month": exp, "receivables": recv,
             "net_profit": {"available": False, "reason": "Net profit needs revenue, cost of goods sold and all expenses from a closed accounting period; it is not estimated from cash movements."}}  # fmt: skip
 
 

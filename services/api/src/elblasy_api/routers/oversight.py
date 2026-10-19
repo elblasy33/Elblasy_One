@@ -269,6 +269,28 @@ def alerts(
                     {"amount": facts["overdue_bills"]["amount"], "currency": facts.get("currency")},
                 )
             )
+        if has_permission(user.role, P_PAYMENTS):
+            try:
+                rec = _client(
+                    conn.base_url,
+                    conn.db_name,
+                    conn.login,
+                    vault.decrypt(conn.secret_ciphertext),
+                    s,
+                ).call_bridge("receivables_overview")
+                if rec["overdue"]["count"]:
+                    out.append(
+                        _alert(
+                            "overdue_customer_invoices",
+                            "warning",
+                            rec["overdue"]["count"],
+                            P_PAYMENTS,
+                            "/money/receivables",
+                            {"amount": rec["overdue"]["amount"], "currency": rec["currency"]},
+                        )
+                    )
+            except Exception:  # noqa: BLE001 - one failing fact must not hide the other alerts
+                log.warning("receivables alert unavailable", exc_info=True)
         if (
             facts.get("stale_sessions")
             and facts["stale_sessions"]["count"]

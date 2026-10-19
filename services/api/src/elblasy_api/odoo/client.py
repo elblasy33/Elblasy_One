@@ -47,6 +47,10 @@ READ_METHODS = frozenset(
         "money_overview",
         "money_ledger",
         "alerts_snapshot",
+        "customers_search",
+        "customer_statement",
+        "invoice_get",
+        "receivables_overview",
     }
 )
 # additive, idempotent, keyed operations only
@@ -67,6 +71,9 @@ WRITE_METHODS = frozenset(
         "stock_set_minimum",
         "stock_adjust",
         "expense_create",
+        "customers_upsert",
+        "customers_set_credit_limit",
+        "receivable_receive",
     }
 )
 ALLOWED_BRIDGE_METHODS = READ_METHODS | WRITE_METHODS

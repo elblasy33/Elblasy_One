@@ -1,5 +1,5 @@
 "use client";
-import { Ban, Banknote, Landmark, Truck, Wallet } from "lucide-react";
+import { Ban, Banknote, Landmark, Truck, Users, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { MoneyTabs } from "@/components/money-tabs";
@@ -39,6 +39,15 @@ export default function MoneyPage() {
                 {d.payables.top.slice(0, 3).map((p) => <p key={p.name} className="text-sm" dir="auto">{p.name}: <b dir="ltr">{money(p.owed)}</b></p>)}
                 <Link href="/inventory/suppliers" className="mt-1 inline-block text-sm font-bold text-brand">{t("mn_go_suppliers")}</Link></div>
             </Card>
+            {d.receivables && (
+              <Card className="flex items-start gap-3">
+                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brandsoft text-brand"><Users className="size-6" aria-hidden /></div>
+                <div><p className="font-bold">{t("cu_receivables")}</p><p className="text-3xl font-black" dir="ltr">{money(d.receivables.total)} <span className="text-sm">{d.currency}</span></p>
+                  {d.receivables.overdue.count > 0 && <p className="text-sm font-bold text-bad">{t("cu_overdue")}: {d.receivables.overdue.count} · <span dir="ltr">{money(d.receivables.overdue.amount)}</span></p>}
+                  {d.receivables.top.slice(0, 3).map((p) => <p key={p.name} className="text-sm" dir="auto">{p.name}: <b dir="ltr">{money(p.owed)}</b></p>)}
+                  <Link href="/money/receivables" className="mt-1 inline-block text-sm font-bold text-brand">{t("cu_title")}</Link></div>
+              </Card>
+            )}
             <Card className="flex items-start gap-3 opacity-90">
               <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-surface2 text-soft"><Ban className="size-6" aria-hidden /></div>
               <div><p className="font-bold">{t("mn_net_profit")}</p><Badge>{t("mn_net_na")}</Badge><p className="mt-1 text-xs text-soft">{t("mn_np_reason")}</p></div>

@@ -66,7 +66,7 @@ export interface SessionView {
   counted_cash?: number; cash_difference?: number; opened_at?: string; closed_at?: string; order_count: number; move_state?: string;
 }
 export interface PosConfig {
-  id: number; name: string; session?: SessionView; payment_methods: { id: number; name: string; is_cash: boolean }[];
+  id: number; name: string; session?: SessionView; payment_methods: { id: number; name: string; is_cash: boolean; is_credit?: boolean }[];
 }
 export interface SalesState { configs: PosConfig[]; currency: string; currency_decimals: number; stock_updates?: string; company?: string }
 export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean }
@@ -80,7 +80,7 @@ export interface OrderView {
 }
 export interface Receipt {
   company?: string; reference: string; date: string; cashier: string; lines: OrderLine[]; total: number; tax: number;
-  paid: number; change: number; payments: { method: string; amount: number }[];
+  paid: number; change: number; payments: { method: string; amount: number }[]; customer?: string; on_account?: number;
 }
 export interface SaleResult { order: OrderView; receipt: Receipt; stock_updated: boolean; replayed: boolean }
 export interface CloseResult { session: SessionView; cash_difference: number; has_difference: boolean }
@@ -115,7 +115,7 @@ export interface ExpenseSummary { from: string; to: string; count: number; incur
 export interface MoneyOverview {
   currency: string; accounts: { journal_id: number; name: string; type: "cash" | "bank"; balance: number }[];
   payables: { total: number; top: { name: string; owed: number }[] }; definition: Record<string, string>;
-  expenses_month: ExpenseSummary; net_profit: { available: boolean; reason: string };
+  expenses_month: ExpenseSummary; net_profit: { available: boolean; reason: string }; receivables?: Receivables;
 }
 export interface LedgerRow { id: number; date: string; name: string; label?: string; partner?: string; amount: number; journal: string }
 export interface PendingExpense { id: string; requested_by: string; created_at: string; amount?: number; description?: string; paid_now: boolean }
@@ -123,3 +123,8 @@ export interface PendingExpense { id: string; requested_by: string; created_at: 
 export interface AuditItem { id: number; ts: string; action: string; outcome: string; actor?: string; target_type?: string; target_id?: string; before?: Record<string, unknown>; after?: Record<string, unknown>; correlation_id?: string }
 export interface OperationItem { id: string; type: string; status: string; actor: string; created_at: string; updated_at: string; safe_error?: string; verified: boolean; needs_attention: boolean }
 export interface AlertItem { key: string; severity: "critical" | "warning" | "info"; count: number; permission: string; link: string; detail: Record<string, unknown> }
+
+export interface Customer { id: number; name: string; phone?: string; email?: string; credit_limit?: number; receivable?: number; available_credit?: number | null }
+export interface CustomerInvoice { id: number; name?: string; date?: string; due?: string; amount_total: number; amount_residual: number; payment_state: string; move_type: string }
+export interface CustomerStatement { customer: Customer; invoices: CustomerInvoice[]; payments: { id: number; name: string; date: string; amount: number; journal: string }[] }
+export interface Receivables { total: number; customers: number; top: { name: string; owed: number }[]; overdue: { count: number; amount: number }; currency: string }

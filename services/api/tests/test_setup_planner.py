@@ -132,3 +132,40 @@ def test_realtime_stock_step_appears_only_when_known_and_is_satisfied_once_on():
     assert "feature_realtime_stock" not in steps(
         build_plan(p, MANIFEST, snap())
     )  # unknown -> not guessed
+
+
+def test_credit_sales_plan_creates_the_method_and_attaches_it_to_an_existing_pos():
+    s = snap()
+    s["pos"]["payment_methods"] = [
+        {"name": "Cash", "type": "cash", "is_cash_count": True, "is_credit": False}
+    ]
+    s["pos"]["configs"] = [
+        {
+            "id": 1,
+            "name": "Main",
+            "payment_methods": 1,
+            "has_cash_method": True,
+            "has_credit_method": False,
+            "has_journal": True,
+        }
+    ]
+    plan = build_plan(BusinessProfile(vertical="general", sells_on_credit=True), MANIFEST, s)
+    st = steps(plan)
+    assert st["pos_pm_credit"]["status"] == "to_apply" and st["pos_pm_credit"]["params"] == {
+        "kind": "credit"
+    }
+    assert st["pos_attach_credit"]["status"] == "to_apply" and st["pos_attach_credit"][
+        "depends_on"
+    ] == ["pos_pm_credit"]
+    assert "pos_pm_bank" not in st  # a credit method is not a bank method
+    s["pos"]["payment_methods"].append(
+        {"name": "Customer account", "type": "pay_later", "is_cash_count": False, "is_credit": True}
+    )
+    s["pos"]["configs"][0]["has_credit_method"] = True
+    done = steps(build_plan(BusinessProfile(vertical="general", sells_on_credit=True), MANIFEST, s))
+    assert (
+        done["pos_pm_credit"]["status"] == "satisfied"
+        and done["pos_attach_credit"]["status"] == "satisfied"
+    )
+    off = steps(build_plan(BusinessProfile(vertical="general"), MANIFEST, snap()))
+    assert "pos_pm_credit" not in off  # a shop that does not sell on credit is never offered it

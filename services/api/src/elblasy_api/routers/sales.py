@@ -16,6 +16,7 @@ from elblasy_api.models import OdooConnection, Operation, User
 from elblasy_api.odoo.client import BridgeClient, OdooError, OdooRejectedError, OdooUncertainError
 from elblasy_api.routers.connections import _client, _owned
 from elblasy_api.security.rbac import (
+    P_CREDIT,
     P_DISCOUNT,
     P_REPORTS,
     P_RETURNS,
@@ -52,6 +53,9 @@ class CheckoutIn(QuoteIn):
     expected_total: float = Field(gt=0, le=1e9)
     payments: list[PaymentIn] = Field(min_length=1, max_length=5)
     partner_id: int | None = Field(default=None, gt=0)
+    override_credit_limit: bool = (
+        False  # needs customers.credit.override; recorded in the audit log
+    )
 
     @model_validator(mode="after")
     def payments_cover_total(self) -> "CheckoutIn":
@@ -109,6 +113,12 @@ def _write_error(db: Session, op: Operation, exc: Exception, what: str) -> Excep
             return api_error(409, "price_changed", msg.removeprefix("PRICE_CHANGED: "))
         if msg.startswith("No open session"):
             return api_error(409, "no_open_session", msg)
+        if msg.startswith("CUSTOMER_REQUIRED"):
+            return api_error(422, "customer_required", msg.removeprefix("CUSTOMER_REQUIRED: "))
+        if msg.startswith("CREDIT_LIMIT_EXCEEDED"):
+            return api_error(
+                409, "credit_limit_exceeded", msg.removeprefix("CREDIT_LIMIT_EXCEEDED: ")
+            )
         return api_error(422, "sales_rejected", msg)
     operations.fail(db, op, "needs_review", str(exc))
     return api_error(502, "odoo_unavailable", str(exc))
@@ -125,6 +135,7 @@ def _receipt(order: dict[str, Any], company: str | None, cashier: str) -> dict[s
         "lines": order["lines"], "total": order["amount_total"], "tax": order["amount_tax"],
         "paid": order["amount_paid"], "change": order["amount_return"],
         "payments": [p for p in order["payments"] if not p["is_change"]], "state": order["state"],
+        "customer": order.get("partner"), "on_account": order.get("credit_amount", 0.0),
     }  # fmt: skip
 
 
@@ -214,6 +225,8 @@ def checkout(
     s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
 ) -> dict[str, Any]:  # fmt: skip
     _check_discounts(user, body.lines)
+    if body.override_credit_limit and not has_permission(user.role, P_CREDIT):
+        raise api_error(403, "forbidden", "You do not have permission to override a credit limit")
     c, client = _conn(db, user, cid, s, vault)
     op, replayed = operations.begin(db, tenant_id=user.tenant_id, connection_id=c.id, actor_id=user.id,
                                     op_type="sales.order.create", idem=idem, payload=body.model_dump())  # fmt: skip
@@ -223,7 +236,8 @@ def checkout(
         out = dict(op.odoo_refs or {})
         return {**out, "replayed": True}
     key = operations.odoo_key(user.tenant_id, c.id, idem)
-    spec = {**body.model_dump(), "note": f"Elblasy cashier: {user.email}"}
+    spec = {**body.model_dump(exclude={"override_credit_limit"}), "credit_override": body.override_credit_limit,
+            "note": f"Elblasy cashier: {user.email}"}  # fmt: skip
     try:
         res = client.call_bridge("sales_checkout", str(op.id), key, spec, timeout=60)
         got = client.call_bridge("sales_get_order", res["refs"]["order"]["id"])
@@ -237,6 +251,11 @@ def checkout(
         and abs(order["amount_paid"] - order["amount_total"]) < MONEY_TOLERANCE
         and len(order["lines"]) == len(body.lines)
         and abs(sum(p["amount"] for p in order["payments"] if not p["is_change"]) - tendered) < MONEY_TOLERANCE
+        and (  # a credit sale must show a posted invoice that is still open for exactly the credit amount
+            not order.get("credit_amount")
+            or (order.get("invoice") and order["invoice"]["state"] == "posted"
+                and abs(order["invoice"]["amount_residual"] - order["credit_amount"]) < MONEY_TOLERANCE)
+        )
     )  # fmt: skip
     if not ok or order is None:
         operations.fail(db, op, "needs_review", "Odoo does not show the sale as requested")
@@ -254,7 +273,9 @@ def checkout(
     audit.record(db, request, action="sales.order.create", outcome="success", actor=user,
                  target_type="pos_order", target_id=order["id"],
                  after={"total": order["amount_total"], "lines": len(order["lines"]),
-                        "discount": any(line.discount > 0 for line in body.lines)})  # fmt: skip
+                        "discount": any(line.discount > 0 for line in body.lines),
+                        "on_credit": order.get("credit_amount", 0.0),
+                        "credit_override": body.override_credit_limit})  # fmt: skip
     db.commit()
     return out
 

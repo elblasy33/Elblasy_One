@@ -24,7 +24,7 @@ from elblasy_api.setup.templates import (
 PLANNER_VERSION = "1.0"
 EXECUTABLE_KINDS = frozenset(
     {"install_module", "enable_feature", "ensure_journal", "ensure_pos_payment_method",
-     "ensure_pos_config"}
+     "ensure_pos_config", "attach_pos_payment_method"}
 )  # fmt: skip
 # Deliberately NOT executable: loading a chart of accounts is financial and irreversible; the
 # plan lists it and the owner/accountant does it deliberately. Revisit once live-tested.
@@ -161,7 +161,8 @@ def build_plan(
     if isinstance(pos, dict) and pos.get("installed") or "module_point_of_sale" in mod_keys:
         methods = pos.get("payment_methods", []) if isinstance(pos, dict) else []
         have_cash = any(m.get("is_cash_count") for m in methods)
-        have_bank = any(not m.get("is_cash_count") for m in methods)
+        have_bank = any(not m.get("is_cash_count") and not m.get("is_credit") for m in methods)
+        have_credit = any(m.get("is_credit") for m in methods)
         pm_keys = []
         if "cash" in pay:
             pm_keys.append("pos_pm_cash")
@@ -177,12 +178,29 @@ def build_plan(
                               "satisfied" if have_bank else "to_apply", True, depends_on=["bank_journal"],
                               impact="Adds a non-cash payment method (no terminal integration).",
                               recovery="Archive it if unused."))  # fmt: skip
+        if (
+            "credit_sales" in features
+        ):  # selling on account: the sale becomes an open invoice for the customer
+            pm_keys.append("pos_pm_credit")
+            steps.append(Step("pos_pm_credit", "ensure_pos_payment_method",
+                              _t("طريقة دفع: حساب العميل (آجل)", "Payment method: Customer account (credit)"),
+                              {"kind": "credit"}, "satisfied" if have_credit else "to_apply", True,
+                              impact="Lets a sale be left on the customer's account; it becomes an open invoice.",
+                              recovery="Archive it if unused."))  # fmt: skip
         have_cfg = bool(pos.get("configs")) if isinstance(pos, dict) else False
         steps.append(Step("pos_main", "ensure_pos_config", _t("نقطة البيع الرئيسية", "Main point of sale"),
                           {"name": "Main", "payment_method_keys": pm_keys},
                           "satisfied" if have_cfg else "to_apply", True, depends_on=pm_keys,
                           impact="Creates one POS and attaches the payment methods above.",
                           recovery="Archive the POS if it has no sessions."))  # fmt: skip
+        if have_cfg and "credit_sales" in features:
+            cfgs = pos.get("configs", []) if isinstance(pos, dict) else []
+            attached = bool(cfgs) and all(c.get("has_credit_method") for c in cfgs)
+            steps.append(Step("pos_attach_credit", "attach_pos_payment_method",
+                              _t("إضافة الدفع الآجل لنقطة البيع", "Add credit payments to the point of sale"),
+                              {"method_key": "pos_pm_credit", "kind": "credit"}, "satisfied" if attached else "to_apply", True,
+                              depends_on=["pos_pm_credit"], impact="Adds the credit method to the existing point of sale; nothing is removed.",
+                              recovery="Detach it from the point of sale in Odoo."))  # fmt: skip
         if have_cfg:
             notes.append({"area": "pos", "note": "Existing POS configuration is kept as is; "
                           "payment-method gaps are reported by the readiness scan."})  # fmt: skip

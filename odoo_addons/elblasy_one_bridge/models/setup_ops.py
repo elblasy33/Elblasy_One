@@ -76,6 +76,7 @@ class ElblasyBridgeSetup(models.AbstractModel):
         "ensure_journal": "_step_ensure_journal",
         "ensure_pos_payment_method": "_step_ensure_pos_payment_method",
         "ensure_pos_config": "_step_ensure_pos_config",
+        "attach_pos_payment_method": "_step_attach_pos_payment_method",
     }
 
     # ---- handlers ----
@@ -143,14 +144,21 @@ class ElblasyBridgeSetup(models.AbstractModel):
     def _step_ensure_pos_payment_method(self, key, p):
         self._need("point_of_sale.group_pos_manager", "create POS payment methods")
         kind = p.get("kind")
-        if kind not in ("cash", "bank"):
+        if kind not in ("cash", "bank", "credit"):
             raise UserError(f"Payment method kind not allowed: {kind}")
         existing = self._managed(key)
         if existing:
             return {"outcome": "already_exists", "refs": {"payment_method_id": existing.id}}
         PM = self.env["pos.payment.method"]
         is_cash = kind == "cash"
-        unmanaged = PM.search([("is_cash_count", "=", is_cash)], limit=1)
+        if kind == "credit":  # "Customer account": the sale becomes an open invoice for the customer
+            unmanaged = PM.search([("split_transactions", "=", True)], limit=1)
+            if unmanaged:
+                return {"outcome": "already_exists", "refs": {"payment_method_id": unmanaged.id, "unmanaged": True}}
+            pm = PM.create({"name": "Customer account", "split_transactions": True, "is_cash_count": False})
+            self._tag(key, pm)
+            return {"outcome": "created", "refs": {"payment_method_id": pm.id}}
+        unmanaged = PM.search([("is_cash_count", "=", is_cash), ("split_transactions", "=", False)], limit=1)
         if unmanaged:
             return {"outcome": "already_exists",
                     "refs": {"payment_method_id": unmanaged.id, "unmanaged": True}}  # fmt: skip
@@ -185,3 +193,19 @@ class ElblasyBridgeSetup(models.AbstractModel):
         self._tag(key, cfg)
         return {"outcome": "created", "refs": {"pos_config_id": cfg.id,
                                                "payment_method_ids": methods.ids}}  # fmt: skip
+
+    @api.model
+    def _step_attach_pos_payment_method(self, key, p):
+        """Adds one payment method to the shop's point(s) of sale. Additive: existing methods stay."""
+        self._need("point_of_sale.group_pos_manager", "change a point of sale")
+        pm = self._managed(p.get("method_key") or "") or self.env["pos.payment.method"].search(
+            [("split_transactions", "=", True)] if p.get("kind") == "credit" else [("id", "=", 0)], limit=1
+        )
+        if not pm:
+            raise UserError("The payment method to attach does not exist yet.")
+        attached = []
+        for cfg in self.env["pos.config"].search([]):
+            if pm not in cfg.payment_method_ids:
+                cfg.write({"payment_method_ids": [(4, pm.id)]})
+                attached.append(cfg.id)
+        return {"outcome": "created" if attached else "already_exists", "refs": {"payment_method_id": pm.id, "configs": attached}}
