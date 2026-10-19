@@ -34,6 +34,11 @@ READ_METHODS = frozenset(
         "purchase_list",
         "purchase_get_bill",
         "purchase_products",
+        "stock_overview",
+        "stock_suggestions",
+        "stock_preview",
+        "stock_has_history",
+        "stock_resolve_barcodes",
     }
 )
 # additive, idempotent, keyed operations only
@@ -51,6 +56,8 @@ WRITE_METHODS = frozenset(
         "purchase_receive",
         "purchase_create_bill",
         "purchase_pay_bill",
+        "stock_set_minimum",
+        "stock_adjust",
     }
 )
 ALLOWED_BRIDGE_METHODS = READ_METHODS | WRITE_METHODS

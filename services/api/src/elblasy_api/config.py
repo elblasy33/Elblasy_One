@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 60 * 8
     cookie_secure: bool = True
     allow_bootstrap: bool = True  # lets the first owner create a tenant; disable after onboarding
+    # Stock adjustments by non-managers above this absolute value change need approval.
+    stock_adjust_approval_value: float = 500.0
     cors_origins: list[str] = []
 
     @property

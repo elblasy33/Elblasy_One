@@ -136,6 +136,7 @@ def run_write(
     before: Callable[[], Any] | None = None,
     rejected_code: str = "rejected",
     timeout: float = 60,
+    keep_payload: bool = False,
 ) -> dict[str, Any]:
     """Idempotent write. `verify(bridge_result, before_state)` must read Odoo again and return the
     final response, or raise api_error(502, ...) when Odoo does not show the intended state."""
@@ -151,6 +152,9 @@ def run_write(
                          op_type=op_type, idem=idem, payload=payload)  # fmt: skip
     if replayed:
         return {**(op.odoo_refs or {}), "replayed": True}
+    if keep_payload and op.payload is None:
+        op.payload = payload  # lets a later retry recognise work this operation already did
+        db.commit()
     key = odoo_key(user.tenant_id, conn.id, idem)
     try:
         # A retry after an *unknown* outcome must be judged against the state from before the first

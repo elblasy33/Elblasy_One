@@ -100,3 +100,11 @@ export interface PurchaseOrder {
 export interface StockLevel { on_hand: number; free: number; incoming: number; outgoing: number; forecast: number }
 export interface PurchProduct { product_id: number; name: string; barcode?: string; cost?: number; on_hand?: number; tracking: string }
 export interface Statement { supplier: Supplier; bills: BillBrief[]; payments: { id: number; name: string; date: string; amount: number; journal: string; state: string }[] }
+
+export interface StockRow {
+  product_id: number; name: string; barcode?: string; on_hand: number; free: number; incoming: number; outgoing: number;
+  forecast: number; min?: number; max?: number; low: boolean; cost?: number; value?: number; tracking: string;
+}
+export interface Suggestion { product_id: number; name: string; forecast: number; on_hand: number; incoming: number; min: number; max: number; suggested_qty: number }
+export interface PendingAdjustment { id: string; status: string; requested_by: string; created_at: string; reason?: string; note?: string; lines: number; value_change?: number }
+export interface CountPreview { lines: { product_id: number; name: string; current: number; counted: number; diff: number; value_change: number }[]; value_change: number }

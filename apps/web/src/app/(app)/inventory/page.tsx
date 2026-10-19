@@ -5,14 +5,13 @@ import { useEffect, useState } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
-import { useConnections, useProducts } from "@/lib/queries";
+import { useActiveConnection, useProducts } from "@/lib/queries";
 
 const PAGE = 20;
 
 export default function InventoryPage() {
   const { t } = useLang();
-  const conns = useConnections();
-  const cid = conns.data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);

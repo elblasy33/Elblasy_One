@@ -1,22 +1,23 @@
 "use client";
-import { Boxes, Truck, ClipboardList } from "lucide-react";
+import { Boxes, ClipboardList, Package, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useLang, type TKey } from "@/lib/i18n";
 import { useMe } from "@/lib/queries";
 
-const TABS: { href: string; label: TKey; icon: typeof Boxes; perm: string; exact?: boolean }[] = [
-  { href: "/inventory", label: "tab_products", icon: Boxes, perm: "products.manage", exact: true },
-  { href: "/inventory/suppliers", label: "tab_suppliers", icon: Truck, perm: "purchasing.view" },
-  { href: "/inventory/purchases", label: "tab_purchases", icon: ClipboardList, perm: "purchasing.view" },
+const TABS: { href: string; label: TKey; icon: typeof Boxes; perm: string[]; exact?: boolean }[] = [
+  { href: "/inventory", label: "tab_products", icon: Boxes, perm: ["products.manage"], exact: true },
+  { href: "/inventory/stock", label: "tab_stock", icon: Package, perm: ["inventory.adjust", "purchasing.view", "products.manage"] },
+  { href: "/inventory/suppliers", label: "tab_suppliers", icon: Truck, perm: ["purchasing.view"] },
+  { href: "/inventory/purchases", label: "tab_purchases", icon: ClipboardList, perm: ["purchasing.view"] },
 ];
 
 export function InventoryTabs() {
   const { t } = useLang();
   const path = usePathname();
   const me = useMe();
-  const tabs = TABS.filter((x) => me.data?.permissions.includes(x.perm));
+  const tabs = TABS.filter((x) => x.perm.some((p) => me.data?.permissions.includes(p)));
   return (
     <nav aria-label="inventory sections" className="flex flex-wrap gap-2">
       {tabs.map((x) => {

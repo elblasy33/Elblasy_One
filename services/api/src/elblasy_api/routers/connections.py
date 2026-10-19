@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from elblasy_api import audit
 from elblasy_api.config import Settings, get_settings
 from elblasy_api.db import get_session
-from elblasy_api.deps import api_error, get_vault, require
+from elblasy_api.deps import api_error, current_user, get_vault, require
 from elblasy_api.models import OdooConnection, User
 from elblasy_api.odoo.client import BridgeClient, OdooCredentials, OdooError
 from elblasy_api.odoo.compat import assess
@@ -136,6 +136,32 @@ def create_connection(
                  after={"name": conn.name, "base_url": conn.base_url, "db": conn.db_name})  # fmt: skip
     db.commit()
     return _out(conn)
+
+
+class CurrentConnection(BaseModel):
+    id: str
+    name: str
+    odoo_series: str | None
+    capabilities: dict[str, bool] | None
+
+
+@router.get("/current")
+def current_connection(
+    user: User = Depends(current_user), db: Session = Depends(get_session)
+) -> CurrentConnection:
+    """The shop's active Odoo connection, for ANY signed-in user (cashiers and clerks need it to work).
+    Deliberately minimal: no URL, database name or login; those stay with connection managers."""
+    c = db.scalar(
+        select(OdooConnection)
+        .where(OdooConnection.tenant_id == user.tenant_id, OdooConnection.status == "active")
+        .order_by(OdooConnection.created_at)
+    )
+    if c is None:
+        raise api_error(404, "no_connection", "No active connection")
+    caps = (c.capability_manifest or {}).get("capabilities")
+    return CurrentConnection(
+        id=str(c.id), name=c.name, odoo_series=c.odoo_series, capabilities=caps
+    )
 
 
 @router.get("")

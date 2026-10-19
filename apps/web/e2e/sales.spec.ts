@@ -31,6 +31,27 @@ async function seed(request: APIRequestContext) {
   return { cid, barcode: p.barcode as string, pid: p.variant_ids[0] as number };
 }
 
+test("a real cashier account can use the register screen (not only the API)", async ({ page, browser }) => {
+  const stamp = Date.now();
+  expect((await page.request.post("/api/auth/bootstrap", { data: { business_name: "بقالة", email: `own-${stamp}@example.com`, password: "correct-horse-battery" } })).status()).toBe(201);
+  const { odoo_url, odoo_db } = state();
+  expect((await page.request.post("/api/connections", { data: { name: "Main", base_url: odoo_url, db_name: odoo_db, login: "admin", secret: "admin" } })).status()).toBe(201);
+  const email = `cash-${stamp}@example.com`;
+  expect((await page.request.post("/api/users", { data: { email, password: "cashier-password-1", role: "cashier" } })).status()).toBe(201);
+  const ctx = await browser.newContext();
+  const cp = await ctx.newPage();
+  await cp.goto("/login");
+  await cp.getByLabel("البريد الإلكتروني").fill(email);
+  await cp.getByLabel("كلمة المرور").fill("cashier-password-1");
+  await cp.getByRole("button", { name: "تسجيل الدخول" }).click();
+  await expect(cp).toHaveURL(/\/today/);
+  await cp.getByRole("link", { name: "المبيعات" }).first().click();
+  // the register screen loads for the cashier: either the open-register form or the scan box
+  await expect(cp.getByRole("heading", { name: "افتح الخزنة" }).or(cp.getByLabel("امسح الباركود أو ابحث باسم المنتج"))).toBeVisible();
+  await expect(cp.getByRole("link", { name: "الإدارة والإعدادات" })).toHaveCount(0);
+  await ctx.close();
+});
+
 test("cashier day: open register, scan, pay with change, refund, close with a cash difference", async ({ page }) => {
   const { barcode, pid } = await seed(page.request);
   await page.goto("/sales");

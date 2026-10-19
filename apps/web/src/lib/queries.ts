@@ -59,3 +59,16 @@ export const usePurchaseOrders = (cid: string | undefined, offset: number) =>
   useQuery({ queryKey: ["purchase-orders", cid, offset], queryFn: () => api<{ total: number; items: PurchaseOrder[] }>(`/connections/${cid}/purchasing/orders?limit=20&offset=${offset}`), enabled: !!cid, placeholderData: (p) => p });
 export const usePurchaseOrder = (cid?: string, id?: string) =>
   useQuery({ queryKey: ["purchase-order", cid, id], queryFn: () => api<{ order: PurchaseOrder; stock: Record<string, StockLevel> }>(`/connections/${cid}/purchasing/orders/${id}`), enabled: !!cid && !!id });
+
+import type { PendingAdjustment, StockRow, Suggestion } from "./types";
+export const useStock = (cid: string | undefined, q: string, low: boolean, offset: number) =>
+  useQuery({ queryKey: ["stock", cid, q, low, offset], queryFn: () => api<{ total: number; items: StockRow[] }>(`/connections/${cid}/stock/overview?q=${encodeURIComponent(q)}&low=${low}&limit=20&offset=${offset}`), enabled: !!cid, placeholderData: (p) => p });
+export const useSuggestions = (cid?: string, enabled = true) =>
+  useQuery({ queryKey: ["stock-suggestions", cid], queryFn: () => api<{ items: Suggestion[] }>(`/connections/${cid}/stock/suggestions`), enabled: !!cid && enabled });
+export const usePendingAdjustments = (cid?: string, enabled = true) =>
+  useQuery({ queryKey: ["stock-pending", cid], queryFn: () => api<{ items: PendingAdjustment[] }>(`/connections/${cid}/stock/adjustments?status=awaiting_approval`), enabled: !!cid && enabled, refetchInterval: 20_000 });
+export const useLowStockCount = (cid?: string, enabled = true) =>
+  useQuery({ queryKey: ["stock-low-count", cid], queryFn: () => api<{ total: number }>(`/connections/${cid}/stock/overview?low=true&limit=1`), enabled: !!cid && enabled, staleTime: 30_000 });
+
+export const useActiveConnection = () =>
+  useQuery({ queryKey: ["connection-current"], queryFn: () => api<{ id: string; name: string; odoo_series: string | null; capabilities: Record<string, boolean> | null }>("/connections/current"), retry: false, staleTime: 60_000 });

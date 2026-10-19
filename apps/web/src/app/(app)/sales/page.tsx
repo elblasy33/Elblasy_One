@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
-import { useConnections, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
+import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
 import type { CloseResult, PosConfig, Quote, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
 interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number }
@@ -25,8 +25,8 @@ function errMsg(t: ReturnType<typeof useLang>["t"], e: unknown): { text: string;
 
 export default function SalesPage() {
   const { t } = useLang();
-  const conns = useConnections();
-  const cid = conns.data?.find((c) => c.status === "active")?.id;
+  const conns = useActiveConnection();
+  const cid = conns.data?.id;
   const state = useSalesState(cid);
   if (conns.isLoading || (cid && state.isLoading)) return <Spinner label={t("loading")} />;
   const cfg = state.data?.configs[0];

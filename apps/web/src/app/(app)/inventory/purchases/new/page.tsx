@@ -2,28 +2,50 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState, type FormEvent } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
-import { Button, Card, ErrorBox } from "@/components/ui";
+import { Button, Card, ErrorBox, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
-import { useConnections, useMe, useSuppliers } from "@/lib/queries";
+import { useActiveConnection, useMe, useSuppliers } from "@/lib/queries";
 import type { PurchaseOrder, PurchProduct } from "@/lib/types";
 
 interface Line { product_id: number; name: string; qty: string; price: string }
 
+function Gate() {
+  const prefill = useSearchParams().get("prefill") !== null;
+  return useHydrated() ? <NewPurchase prefill={prefill} /> : <Spinner />;
+}
+
 export default function NewPurchasePage() {
+  return <Suspense fallback={<Spinner />}><Gate /></Suspense>;
+}
+
+/** Suggestions from the stock screen arrive as a draft only: the user still picks the supplier and confirms. */
+function loadPrefill(wanted: boolean): Line[] {
+  if (!wanted) return [];
+  try {
+    const raw = sessionStorage.getItem("po-prefill");
+    sessionStorage.removeItem("po-prefill");
+    return raw ? (JSON.parse(raw) as { product_id: number; name: string; qty: string }[]).map((x) => ({ ...x, price: "" })) : [];
+  } catch {
+    return [];
+  }
+}
+
+function NewPurchase({ prefill }: { prefill: boolean }) {
   const { t } = useLang();
   const hydrated = useHydrated();
   const qc = useQueryClient();
   const me = useMe();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const canPrice = !!me.data?.permissions.includes("products.cost.view");
   const suppliers = useSuppliers(cid, "");
   const [partner, setPartner] = useState<number | null>(null);
-  const [lines, setLines] = useState<Line[]>([]);
+  const [lines, setLines] = useState<Line[]>(() => loadPrefill(prefill));
   const [text, setText] = useState("");
   const keyFor = useIdempotencyKey();
   const found = useQuery({

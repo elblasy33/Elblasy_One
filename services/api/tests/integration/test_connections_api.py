@@ -142,3 +142,30 @@ def test_readiness_requires_permission(client, target):
     cash = TestClient(create_app())
     cash.post("/auth/login", json={"email": "cash@example.com", "password": "cashier-password-1"})
     assert cash.get(f"/connections/{cid}/readiness").status_code == 403
+
+
+def test_any_signed_in_user_gets_a_minimal_current_connection(client, target):
+    import uuid as _u
+
+    _, url, db = target
+    assert client.get("/connections/current").status_code == 404  # none yet
+    cid = client.post("/connections", json=body(url, db)).json()["id"]
+    email = f"cur{_u.uuid4().hex[:8]}@example.com"
+    client.post(
+        "/users", json={"email": email, "password": "cashier-password-1", "role": "cashier"}
+    )
+    cash = TestClient(create_app())
+    cash.post("/auth/login", json={"email": email, "password": "cashier-password-1"})
+    assert cash.get("/connections").status_code == 403  # the full list stays restricted
+    r = cash.get("/connections/current")
+    assert r.status_code == 200 and r.json()["id"] == cid
+    assert set(r.json()) == {
+        "id",
+        "name",
+        "odoo_series",
+        "capabilities",
+    }  # no URL, database or login
+    other = TestClient(create_app())
+    make_owner(other, f"{_u.uuid4().hex[:8]}@example.com", business="Other")
+    assert other.get("/connections/current").status_code == 404  # another shop never sees it
+    assert TestClient(create_app()).get("/connections/current").status_code == 401

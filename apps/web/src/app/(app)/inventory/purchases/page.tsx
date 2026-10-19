@@ -6,13 +6,13 @@ import { InventoryTabs } from "@/components/inv-tabs";
 import { money } from "@/components/receipt";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
-import { useConnections, useMe, usePurchaseOrders } from "@/lib/queries";
+import { useActiveConnection, useMe, usePurchaseOrders } from "@/lib/queries";
 import { receiptState } from "@/lib/purchasing";
 
 export default function PurchasesPage() {
   const { t } = useLang();
   const me = useMe();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const [offset, setOffset] = useState(0);
   const list = usePurchaseOrders(cid, offset);
   const canManage = !!me.data?.permissions.includes("purchasing.manage");

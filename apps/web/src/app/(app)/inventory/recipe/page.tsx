@@ -8,7 +8,7 @@ import { Button, Card, ErrorBox, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
-import { useConnections, useProducts } from "@/lib/queries";
+import { useActiveConnection, useProducts } from "@/lib/queries";
 
 interface Line { template_id: number; name: string; qty: string }
 
@@ -16,7 +16,7 @@ function RecipeForm() {
   const { t } = useLang();
   const params = useSearchParams();
   const finished = Number(params.get("template") ?? 0);
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const keyFor = useIdempotencyKey();
   const [text, setText] = useState("");
   const [lines, setLines] = useState<Line[]>([]);

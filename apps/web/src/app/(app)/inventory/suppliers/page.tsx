@@ -10,7 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
-import { useConnections, useMe, useSuppliers } from "@/lib/queries";
+import { useActiveConnection, useMe, useSuppliers } from "@/lib/queries";
 import type { Supplier } from "@/lib/types";
 
 export default function SuppliersPage() {
@@ -18,7 +18,7 @@ export default function SuppliersPage() {
   const hydrated = useHydrated();
   const qc = useQueryClient();
   const me = useMe();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);

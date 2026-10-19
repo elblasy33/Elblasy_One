@@ -5,12 +5,12 @@ import { money } from "@/components/receipt";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
 import { PAY_KEY } from "@/lib/purchasing";
-import { useConnections, useStatement } from "@/lib/queries";
+import { useActiveConnection, useStatement } from "@/lib/queries";
 
 export default function StatementPage() {
   const { t } = useLang();
   const { id } = useParams<{ id: string }>();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const st = useStatement(cid, id);
   if (!st.data) return <Spinner label={t("loading")} />;
   const s = st.data;

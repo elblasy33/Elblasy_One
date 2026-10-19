@@ -77,6 +77,9 @@ class Operation(Base):
     odoo_refs: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     safe_error: Mapped[str | None] = mapped_column(String(500))
     verification: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Request kept only for operations that wait for a human decision (e.g. stock adjustments).
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_now, onupdate=_now

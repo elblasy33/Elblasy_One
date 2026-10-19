@@ -28,6 +28,7 @@ const ALIASES: Record<string, string> = {
   cost: "cost", "التكلفة": "cost", "سعر الشراء": "cost", barcode: "barcode", "الباركود": "barcode",
   category: "category", "التصنيف": "category", sku: "sku", "الكود": "sku", kind: "kind", "النوع": "kind",
   auto_barcode: "auto_barcode",
+  qty: "qty", quantity: "qty", "الكمية": "qty", unit_cost: "unit_cost", "تكلفة الوحدة": "unit_cost",
 };
 
 export function toObjects(rows: string[][]): Record<string, string>[] {

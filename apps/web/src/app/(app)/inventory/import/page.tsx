@@ -6,13 +6,13 @@ import { Button, Card, ErrorBox } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { parseCsv, TEMPLATE_CSV, toObjects } from "@/lib/csv";
 import { errorText, useLang } from "@/lib/i18n";
-import { useConnections } from "@/lib/queries";
+import { useActiveConnection } from "@/lib/queries";
 import type { ImportResult, ImportValidation } from "@/lib/types";
 
 export default function ImportPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const [text, setText] = useState("");
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [check, setCheck] = useState<ImportValidation | null>(null);

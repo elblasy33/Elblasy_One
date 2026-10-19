@@ -59,3 +59,21 @@ def require(permission: str) -> Callable[..., User]:
         return user
 
     return dep
+
+
+def require_any(*permissions: str) -> Callable[..., User]:
+    """Allow a user holding at least one of the permissions (checked on the server, audited on denial)."""
+
+    def dep(
+        request: Request, user: User = Depends(current_user), db: Session = Depends(get_session)
+    ) -> User:
+        if not any(has_permission(user.role, p) for p in permissions):
+            audit.record(
+                db, request, action="authz.denied", outcome="denied", actor=user,
+                after={"permission": "|".join(permissions)},
+            )  # fmt: skip
+            db.commit()
+            raise api_error(403, "forbidden", "You do not have permission for this action")
+        return user
+
+    return dep

@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
 import { PAY_KEY, receiptState } from "@/lib/purchasing";
-import { useConnections, useMe, usePurchaseOrder } from "@/lib/queries";
+import { useActiveConnection, useMe, usePurchaseOrder } from "@/lib/queries";
 import type { BillBrief, PoLine, PurchaseOrder } from "@/lib/types";
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
@@ -37,7 +37,7 @@ export default function PurchaseDetail() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const me = useMe();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const cid = useActiveConnection().data?.id;
   const data = usePurchaseOrder(cid, id);
   const [dlg, setDlg] = useState<"receive" | "pay" | null>(null);
   const [payBill, setPayBill] = useState<BillBrief | null>(null);
