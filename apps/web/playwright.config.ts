@@ -21,8 +21,9 @@ export default defineConfig({
   reporter: [["list"]],
   use: { baseURL: "http://localhost:3100", locale: "ar-EG", trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /(responsive|catalog|sales)\.spec\.ts/ },
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /(responsive|catalog|sales|purchasing)\.spec\.ts/ },
     // runs after onboarding, which installs manufacturing and creates the POS in the shared Odoo copy
+    { name: "purchasing", use: { ...devices["Desktop Chrome"] }, testMatch: /purchasing\.spec\.ts/, dependencies: ["sales"] },
     { name: "sales", use: { ...devices["Desktop Chrome"] }, testMatch: /sales\.spec\.ts/, dependencies: ["catalog"] },
     { name: "catalog", use: { ...devices["Desktop Chrome"] }, testMatch: /catalog\.spec\.ts/, dependencies: ["desktop"] },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /responsive\.spec\.ts/ },

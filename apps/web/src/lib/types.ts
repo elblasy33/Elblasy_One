@@ -88,3 +88,15 @@ export interface DaySummary {
   day: string; orders: number; gross_sales: number; refunds: number; net_sales: number; cash_collected: number;
   currency: string; definition: Record<string, string>;
 }
+
+export interface Supplier { id: number; name: string; phone?: string; email?: string; balance?: number }
+export interface PoLine { id: number; product_id: number; name: string; ordered: number; received: number; billed: number; price_unit?: number; subtotal?: number; tracking: string }
+export interface BillBrief { id: number; name?: string; state: string; payment_state: string; amount_total: number; amount_residual: number; invoice_date?: string }
+export interface PurchaseOrder {
+  id: number; name: string; state: string; partner_id: number; partner: string; date_order: string;
+  amount_total?: number; amount_tax?: number; invoice_status: string; lines: PoLine[];
+  pickings: { id: number; name: string; state: string }[]; bills?: BillBrief[];
+}
+export interface StockLevel { on_hand: number; free: number; incoming: number; outgoing: number; forecast: number }
+export interface PurchProduct { product_id: number; name: string; barcode?: string; cost?: number; on_hand?: number; tracking: string }
+export interface Statement { supplier: Supplier; bills: BillBrief[]; payments: { id: number; name: string; date: string; amount: number; journal: string; state: string }[] }

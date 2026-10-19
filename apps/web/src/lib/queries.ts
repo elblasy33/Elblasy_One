@@ -49,3 +49,13 @@ export const useSessionOrders = (cid?: string, sessionId?: number) =>
   });
 export const useDaySummary = (cid?: string, enabled = true) =>
   useQuery({ queryKey: ["sales-summary", cid], queryFn: () => api<DaySummary>(`/connections/${cid}/sales/summary`), enabled: !!cid && enabled, staleTime: 30_000 });
+
+import type { PurchaseOrder, StockLevel, Statement, Supplier } from "./types";
+export const useSuppliers = (cid: string | undefined, q: string) =>
+  useQuery({ queryKey: ["suppliers", cid, q], queryFn: () => api<{ total: number; items: Supplier[] }>(`/connections/${cid}/purchasing/suppliers?q=${encodeURIComponent(q)}&limit=50`), enabled: !!cid, placeholderData: (p) => p });
+export const useStatement = (cid?: string, sid?: string) =>
+  useQuery({ queryKey: ["statement", cid, sid], queryFn: () => api<Statement>(`/connections/${cid}/purchasing/suppliers/${sid}/statement`), enabled: !!cid && !!sid });
+export const usePurchaseOrders = (cid: string | undefined, offset: number) =>
+  useQuery({ queryKey: ["purchase-orders", cid, offset], queryFn: () => api<{ total: number; items: PurchaseOrder[] }>(`/connections/${cid}/purchasing/orders?limit=20&offset=${offset}`), enabled: !!cid, placeholderData: (p) => p });
+export const usePurchaseOrder = (cid?: string, id?: string) =>
+  useQuery({ queryKey: ["purchase-order", cid, id], queryFn: () => api<{ order: PurchaseOrder; stock: Record<string, StockLevel> }>(`/connections/${cid}/purchasing/orders/${id}`), enabled: !!cid && !!id });

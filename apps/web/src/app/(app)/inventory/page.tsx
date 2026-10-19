@@ -2,6 +2,7 @@
 import { Boxes, FileUp, Plus, Scale, Search, Shapes, Timer } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { InventoryTabs } from "@/components/inv-tabs";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
 import { useConnections, useProducts } from "@/lib/queries";
@@ -24,6 +25,7 @@ export default function InventoryPage() {
 
   return (
     <div className="rise space-y-5">
+      <InventoryTabs />
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="flex items-center gap-3 text-3xl font-black"><Boxes className="size-8 text-brand" aria-hidden /> {t("prod_title")}</h1>
         <div className="flex gap-2">

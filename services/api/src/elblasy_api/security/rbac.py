@@ -28,20 +28,32 @@ P_MULTI_COMPANY = "companies.switch"
 P_AUDIT = "audit.view"
 P_PRODUCTS = "products.manage"
 P_PRODUCTS_VIEW = "products.view"
+P_PURCHASING = "purchasing.manage"
+P_PURCHASING_VIEW = "purchasing.view"
 
 ALL = {
     P_SALES, P_DISCOUNT, P_RETURNS, P_PAYMENTS, P_EXPENSES, P_STOCK_ADJUST, P_COST_VISIBLE,
     P_CREDIT, P_CONFIG, P_CONNECTIONS, P_USERS, P_REPORTS, P_MULTI_COMPANY, P_AUDIT,
-    P_PRODUCTS, P_PRODUCTS_VIEW,
+    P_PRODUCTS, P_PRODUCTS_VIEW, P_PURCHASING, P_PURCHASING_VIEW,
 }  # fmt: skip
 
 PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.OWNER: frozenset(ALL),
     Role.MANAGER: frozenset(ALL - {P_USERS, P_CONNECTIONS, P_MULTI_COMPANY}),
     Role.CASHIER: frozenset({P_SALES, P_PRODUCTS_VIEW}),
-    Role.INVENTORY_OPERATOR: frozenset({P_STOCK_ADJUST, P_PRODUCTS, P_PRODUCTS_VIEW}),
+    Role.INVENTORY_OPERATOR: frozenset(
+        {P_STOCK_ADJUST, P_PRODUCTS, P_PRODUCTS_VIEW, P_PURCHASING, P_PURCHASING_VIEW}
+    ),
     Role.ACCOUNTANT: frozenset(
-        {P_PAYMENTS, P_EXPENSES, P_REPORTS, P_COST_VISIBLE, P_AUDIT, P_PRODUCTS_VIEW}
+        {
+            P_PAYMENTS,
+            P_EXPENSES,
+            P_REPORTS,
+            P_COST_VISIBLE,
+            P_AUDIT,
+            P_PRODUCTS_VIEW,
+            P_PURCHASING_VIEW,
+        }
     ),
     Role.PLATFORM_ADMIN: frozenset({P_CONNECTIONS, P_CONFIG, P_USERS, P_AUDIT}),
 }

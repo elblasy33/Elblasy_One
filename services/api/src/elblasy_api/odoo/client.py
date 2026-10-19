@@ -27,6 +27,13 @@ READ_METHODS = frozenset(
         "sales_get_session",
         "sales_summary",
         "sales_search",
+        "suppliers_search",
+        "supplier_statement",
+        "stock_levels",
+        "purchase_get",
+        "purchase_list",
+        "purchase_get_bill",
+        "purchase_products",
     }
 )
 # additive, idempotent, keyed operations only
@@ -39,6 +46,11 @@ WRITE_METHODS = frozenset(
         "sales_checkout",
         "sales_refund",
         "sales_close_session",
+        "suppliers_upsert",
+        "purchase_create_order",
+        "purchase_receive",
+        "purchase_create_bill",
+        "purchase_pay_bill",
     }
 )
 ALLOWED_BRIDGE_METHODS = READ_METHODS | WRITE_METHODS

@@ -153,6 +153,9 @@ class ElblasyBridgeCatalog(models.AbstractModel):
                 raise UserError("Set barcodes per variant, not on the model, for products with variants.")
 
         tmpl = self.env["product.template"].create(vals)
+        if vals.get("standard_price") and tmpl.product_variant_count > 1:
+            # Odoo applies the template cost only when there is a single variant; give every variant it.
+            tmpl.product_variant_ids.write({"standard_price": vals["standard_price"]})
         self._tag(xml_name, tmpl)
         return wire({"outcome": "created", "refs": self._product_view(tmpl)})
 
