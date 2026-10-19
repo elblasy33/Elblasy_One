@@ -493,13 +493,17 @@ def test_partial_refund_by_line_quantity_until_nothing_is_left(shop):
     assert abs(first.json()["order"]["amount_total"] + unit) < 0.01
     assert on_hand(url, db, pid) == 97.0  # 100 - 4 sold + 1 back
     too_many = go(4)  # only 3 left to give back
-    assert too_many.status_code == 422 and "more than was sold" in too_many.json()["error"]["message"]
+    assert (
+        too_many.status_code == 422 and "more than was sold" in too_many.json()["error"]["message"]
+    )
     rest = client.post(url_, json={"payment_method_id": cash}, headers=idem())  # everything left
     assert rest.status_code == 201, rest.text
     assert abs(rest.json()["order"]["amount_total"] + 3 * unit) < 0.01
     assert on_hand(url, db, pid) == 100.0
     done = client.post(url_, json={"payment_method_id": cash}, headers=idem())
     assert done.status_code == 422 and "already refunded" in done.json()["error"]["message"]
-    view = client.get(f"/connections/{cid}/sales/orders", params={"session_id": order["session_id"]}).json()
+    view = client.get(
+        f"/connections/{cid}/sales/orders", params={"session_id": order["session_id"]}
+    ).json()
     original = next(o for o in view["items"] if o["id"] == order["id"])
     assert original["lines"][0]["refunded_qty"] == 4

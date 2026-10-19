@@ -80,7 +80,9 @@ class RefundLineIn(BaseModel):
 
 class RefundIn(BaseModel):
     payment_method_id: int = Field(gt=0)
-    lines: list[RefundLineIn] = Field(default_factory=list, max_length=200)  # empty = everything left
+    lines: list[RefundLineIn] = Field(
+        default_factory=list, max_length=200
+    )  # empty = everything left
 
 
 def _conn(

@@ -54,7 +54,7 @@ export interface Readiness {
 export interface Product {
   template_id: number; name: string; sku?: string; barcode?: string; price: number; cost?: number;
   category?: string; uom: string; on_hand?: number; tracking: string; variant_count: number;
-  by_weight: boolean; in_pos: boolean; managed: boolean;
+  by_weight: boolean; in_pos: boolean; managed: boolean; active?: boolean;
 }
 export interface ProductPage { total: number; items: Product[] }
 export interface CreatedProduct { template_id: number; name: string; barcode?: string; variant_count: number; outcome: string; replayed: boolean }

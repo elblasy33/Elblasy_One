@@ -238,19 +238,104 @@ def post_product(
 @router.get("/products")
 def list_products(
     cid: uuid.UUID, q: str = Query("", max_length=100), limit: int = Query(25, ge=1, le=100),
-    offset: int = Query(0, ge=0, le=100_000),
+    offset: int = Query(0, ge=0, le=100_000), archived: bool = False,
     user: User = Depends(require(P_PRODUCTS_VIEW)), db: Session = Depends(get_session),
     s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
 ) -> dict[str, Any]:  # fmt: skip
     _, client = _conn(db, user, cid, s, vault)
     try:
-        res = client.call_bridge("catalog_search", q, limit, offset)
+        res = client.call_bridge("catalog_search", q, limit, offset, archived)
     except OdooError as exc:
         raise api_error(502, "odoo_unavailable", str(exc)) from exc
     if not has_permission(user.role, P_COST_VISIBLE):  # enforced here, not in the UI
         for it in res.get("items", []):
             it.pop("cost", None)
     return res
+
+
+@router.get("/categories")
+def list_categories(
+    cid: uuid.UUID, user: User = Depends(require(P_PRODUCTS_VIEW)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    _, client = _conn(db, user, cid, s, vault)
+    try:
+        return client.call_bridge("catalog_categories")
+    except OdooError as exc:
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+
+
+class ProductPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    price: float | None = Field(default=None, ge=0, le=1e9)
+    cost: float | None = Field(default=None, ge=0, le=1e9)
+    sku: str | None = Field(default=None, max_length=64)
+    barcode: str | None = Field(default=None, max_length=64)
+    category: str | None = Field(default=None, max_length=100)
+    in_pos: bool | None = None
+    active: bool | None = None
+
+
+@router.patch("/products/{template_id}")
+def patch_product(
+    cid: uuid.UUID, template_id: int, body: ProductPatch, idem: IDEM, request: Request,
+    user: User = Depends(require(P_PRODUCTS)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    c, client = _conn(db, user, cid, s, vault)
+    changes = body.model_dump(exclude_unset=True)
+    if "cost" in changes and not has_permission(user.role, P_COST_VISIBLE):
+        raise api_error(403, "forbidden", "You may not change costs")
+    if not changes:
+        raise api_error(422, "nothing_to_change", "Nothing to change")
+    spec = {"template_id": template_id, **changes}
+
+    def verify(res: dict[str, Any], _before: Any) -> dict[str, Any]:
+        try:
+            got = client.call_bridge("catalog_get", template_id)
+        except OdooError as exc:
+            raise api_error(
+                502, "verification_unavailable", "Saved, but could not verify. Retry."
+            ) from exc
+        want = {
+            "name": "name",
+            "price": "price",
+            "cost": "cost",
+            "sku": "sku",
+            "category": "category",
+            "in_pos": "in_pos",
+            "active": "active",
+        }
+        for field, key in want.items():
+            if field not in changes or changes[field] is None:
+                continue
+            a, b = got.get(key), changes[field]
+            same = (
+                abs(float(a or 0) - float(b)) < 0.005
+                if isinstance(b, float | int) and not isinstance(b, bool)
+                else a == b
+            )
+            if not same:
+                raise api_error(502, "verification_failed", f"Odoo does not show the new {field}")
+        if "barcode" in changes and (got.get("barcode") or None) != (
+            (changes["barcode"] or "").strip() or None
+        ):
+            raise api_error(502, "verification_failed", "Odoo does not show the new barcode")
+        return {
+            "template_id": template_id,
+            "outcome": res["outcome"],
+            "replayed": False,
+            "name": got.get("name"),
+            "active": got.get("active"),
+        }
+
+    return operations.run_write(
+        db, request, user=user, conn=c, client=client, op_type="catalog.product.update", idem=idem,
+        payload=spec, method="catalog_update_product", spec=spec, verify=verify, what="product",
+        audit_action="catalog.product.archive" if changes.get("active") is False else "catalog.product.update",
+        target_type="product", target_id=lambda o: o["template_id"],
+        audit_after=lambda o: {k: v for k, v in changes.items() if k != "cost"}, rejected_code="product_rejected",
+    )  # fmt: skip
 
 
 @router.post("/recipes", status_code=201)

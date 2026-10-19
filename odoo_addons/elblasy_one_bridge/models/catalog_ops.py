@@ -161,7 +161,7 @@ class ElblasyBridgeCatalog(models.AbstractModel):
 
     # ---- read ----
     @api.model
-    def catalog_search(self, query, limit, offset):
+    def catalog_search(self, query, limit, offset, archived=False):
         self._require_internal_user()
         limit = max(1, min(int(limit or 25), SEARCH_LIMIT_MAX))
         offset = max(0, int(offset or 0))
@@ -170,6 +170,9 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         if q:
             domain += ["|", "|", ("name", "ilike", q), ("barcode", "ilike", q), ("default_code", "ilike", q)]
         T = self.env["product.template"]
+        if archived:
+            T = T.with_context(active_test=False)
+            domain += [("active", "=", False)]
         total = T.search_count(domain)
         rows = []
         for t in T.search(domain, limit=limit, offset=offset, order="name"):
@@ -188,6 +191,7 @@ class ElblasyBridgeCatalog(models.AbstractModel):
                     "variant_count": t.product_variant_count,
                     "by_weight": bool(t.to_weight) if "to_weight" in t._fields else False,
                     "in_pos": bool(t.available_in_pos) if "available_in_pos" in t._fields else False,
+                    "active": bool(t.active),
                     "managed": bool(
                         self.env["ir.model.data"].sudo().search_count(
                             [("module", "=", XMLID_MODULE), ("model", "=", "product.template"), ("res_id", "=", t.id)]
@@ -259,8 +263,66 @@ class ElblasyBridgeCatalog(models.AbstractModel):
                 "by_weight": bool(t.to_weight) if "to_weight" in t._fields else False,
                 "uom": t.uom_id.name,
                 "tracking": t.tracking if "tracking" in t._fields else "none",
+                "active": bool(t.active),
+                "sku": t.default_code or None,
+                "category": t.categ_id.name or None,
+                "cost": t.standard_price,
+                "in_pos": bool(t.available_in_pos) if "available_in_pos" in t._fields else False,
+                "on_hand": t.qty_available if t.is_storable else None,
             }
         )
+
+    @api.model
+    def catalog_categories(self):
+        self._require_internal_user()
+        rows = self.env["product.category"].search_read([], ["complete_name"], order="complete_name", limit=500)
+        return wire({"items": [r["complete_name"] for r in rows]})
+
+    @api.model
+    def catalog_update_product(self, op_id, key, spec):
+        """Set fields of an existing product to the given values (naturally idempotent). Only fields
+        named in `spec` change; archiving is refused while stock remains, so stock never hides."""
+        self._require_internal_user()
+        t = self.env["product.template"].with_context(active_test=False).browse(int(spec.get("template_id") or 0)).exists()
+        if not t:
+            raise UserError("Product not found.")
+        vals = {}
+        if "name" in spec:
+            vals["name"] = _clean_text(spec["name"], "name", 200)
+        if "price" in spec:
+            vals["list_price"] = _number(spec["price"], "price")
+        if "cost" in spec and spec["cost"] is not None:
+            vals["standard_price"] = _number(spec["cost"], "cost")
+        if "sku" in spec:
+            vals["default_code"] = _clean_text(spec["sku"], "sku", 64) if spec["sku"] else False
+        if spec.get("category"):
+            vals["categ_id"] = self._ensure_category(spec["category"]).id
+        if "in_pos" in spec and self._installed("point_of_sale"):
+            vals["available_in_pos"] = bool(spec["in_pos"])
+        if "barcode" in spec:
+            barcode = (spec["barcode"] or "").strip()
+            if barcode:
+                if not re.fullmatch(r"[0-9A-Za-z\-]{3,64}", barcode):
+                    raise UserError("Barcode may contain only letters, digits and dashes (3-64).")
+                if t.product_variant_count > 1:
+                    raise UserError("Set barcodes per variant for products with variants.")
+                clash = self.env["product.product"].with_context(active_test=False).search(
+                    [("barcode", "=", barcode), ("product_tmpl_id", "!=", t.id)], limit=1
+                )
+                if clash:
+                    raise UserError(f"Barcode {barcode} is already used by '{clash.display_name}'.")
+            vals["barcode"] = barcode or False
+        if "active" in spec:
+            want = bool(spec["active"])
+            if not want and t.active and t.is_storable and abs(t.qty_available) > 1e-9:
+                raise UserError("This product still has stock; bring it to zero before archiving it.")
+            vals["active"] = want
+        if not vals:
+            raise UserError("Nothing to change.")
+        t.write(vals)
+        if vals.get("standard_price") is not None and t.product_variant_count > 1:
+            t.product_variant_ids.write({"standard_price": vals["standard_price"]})
+        return wire({"outcome": "updated", "refs": self._product_view(t)})
 
     @api.model
     def catalog_barcodes_taken(self, barcodes):

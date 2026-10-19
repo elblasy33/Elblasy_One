@@ -23,10 +23,10 @@ export const useHealth = (cid?: string) =>
     queryFn: () => api<{ ok: boolean; status: string; checked_at?: string; compatibility?: string }>(`/connections/${cid}/health`),
     enabled: !!cid, staleTime: 60_000,
   });
-export const useProducts = (cid: string | undefined, q: string, offset: number, limit = 20) =>
+export const useProducts = (cid: string | undefined, q: string, offset: number, limit = 20, archived = false) =>
   useQuery({
-    queryKey: ["products", cid, q, offset],
-    queryFn: () => api<ProductPage>(`/connections/${cid}/catalog/products?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
+    queryKey: ["products", cid, q, offset, archived],
+    queryFn: () => api<ProductPage>(`/connections/${cid}/catalog/products?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}${archived ? "&archived=true" : ""}`),
     enabled: !!cid, placeholderData: (prev) => prev,
   });
 
@@ -97,3 +97,6 @@ export const useCustomers = (cid: string | undefined, q: string) =>
   useQuery({ queryKey: ["customers", cid, q], queryFn: () => api<{ total: number; items: Customer[] }>(`/connections/${cid}/customers?q=${encodeURIComponent(q)}&limit=30`), enabled: !!cid, placeholderData: (p) => p });
 export const useCustomerStatement = (cid?: string, id?: number) =>
   useQuery({ queryKey: ["customer-statement", cid, id], queryFn: () => api<CustomerStatement>(`/connections/${cid}/customers/${id}/statement`), enabled: !!cid && !!id });
+
+export const useCategories = (cid: string | undefined) =>
+  useQuery({ queryKey: ["categories", cid], queryFn: () => api<{ items: string[] }>(`/connections/${cid}/catalog/categories`), enabled: !!cid, staleTime: 60_000 });

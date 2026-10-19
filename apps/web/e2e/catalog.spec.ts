@@ -78,4 +78,15 @@ test("grocery owner adds weighed and made products, builds a recipe, and imports
   await page.goto("/inventory");
   await page.getByPlaceholder("ابحث بالاسم أو الباركود").fill("رز");
   await expect(page.getByText("رز").first()).toBeVisible();
+
+  // ---- edit the price, then archive (no stock yet) and find it under archived products
+  await page.locator("li", { hasText: "رز" }).first().getByRole("button", { name: "تعديل" }).click();
+  await page.getByLabel("السعر").fill("27");
+  await page.getByRole("button", { name: "حفظ التعديلات" }).click();
+  await expect(page.locator("li", { hasText: "رز" }).first().getByText("27")).toBeVisible();
+  await page.locator("li", { hasText: "رز" }).first().getByRole("button", { name: "تعديل" }).click();
+  await page.getByRole("button", { name: "أرشفة المنتج (إخفاؤه)" }).click();
+  await expect(page.getByText("رز")).toHaveCount(0);
+  await page.getByRole("button", { name: "المنتجات المؤرشفة" }).click();
+  await expect(page.getByText("رز").first()).toBeVisible();
 });

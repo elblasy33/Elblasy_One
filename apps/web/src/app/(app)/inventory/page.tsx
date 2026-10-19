@@ -1,11 +1,13 @@
 "use client";
-import { Boxes, FileUp, Plus, Scale, Search, Shapes, Timer } from "lucide-react";
+import { Archive, Boxes, FileUp, Pencil, Plus, Scale, Search, Shapes, Timer } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
+import { ProductEditor } from "@/components/product-editor";
 import { Badge, Card, Spinner } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
-import { useActiveConnection, useProducts } from "@/lib/queries";
+import { useActiveConnection, useMe, useProducts } from "@/lib/queries";
+import type { Product } from "@/lib/types";
 
 const PAGE = 20;
 
@@ -19,7 +21,10 @@ export default function InventoryPage() {
     const id = setTimeout(() => { setQ(text.trim()); setOffset(0); }, 300);
     return () => clearTimeout(id);
   }, [text]);
-  const products = useProducts(cid, q, offset, PAGE);
+  const [archived, setArchived] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const canEdit = !!useMe().data?.permissions.includes("products.manage");
+  const products = useProducts(cid, q, offset, PAGE, archived);
   const d = products.data;
 
   return (
@@ -28,6 +33,7 @@ export default function InventoryPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="flex items-center gap-3 text-3xl font-black"><Boxes className="size-8 text-brand" aria-hidden /> {t("prod_title")}</h1>
         <div className="flex gap-2">
+          {canEdit && <button onClick={() => { setArchived(!archived); setOffset(0); }} aria-pressed={archived} className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-line px-4 text-sm font-bold hover:bg-surface2"><Archive className="size-4" aria-hidden /> {archived ? t("pe_active_view") : t("pe_archived_view")}</button>}
           <Link href="/inventory/import" className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-line px-4 text-sm font-bold hover:bg-surface2"><FileUp className="size-4" aria-hidden /> {t("prod_import")}</Link>
           <Link href="/inventory/new" className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-brand px-4 text-sm font-bold text-brandink shadow-card hover:brightness-110"><Plus className="size-4" aria-hidden /> {t("prod_add")}</Link>
         </div>
@@ -69,6 +75,7 @@ export default function InventoryPage() {
                     {p.cost !== undefined && <div><dt className="text-xs text-soft">{t("prod_cost")}</dt><dd className="font-black" dir="ltr">{p.cost}</dd></div>}
                     <div><dt className="text-xs text-soft">{t("prod_stock")}</dt><dd className="font-black" dir="ltr">{p.on_hand ?? "—"}</dd></div>
                   </dl>
+                  {canEdit && <button onClick={() => setEditing(p)} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm font-bold hover:bg-surface2"><Pencil className="size-4" aria-hidden /> {t("pe_edit")}</button>}
                 </Card>
               </li>
             ))}
@@ -80,6 +87,7 @@ export default function InventoryPage() {
           </nav>
         </>
       )}
+      {editing && cid && <ProductEditor cid={cid} product={{ ...editing, active: !archived }} onClose={() => setEditing(null)} />}
     </div>
   );
 }
