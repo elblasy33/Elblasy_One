@@ -5,6 +5,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from elblasy_api.routers.connections import _client, _owned
 from elblasy_api.security.rbac import (
     P_CREDIT,
     P_DISCOUNT,
+    P_PRICE,
     P_REPORTS,
     P_RETURNS,
     P_SALES,
@@ -39,6 +41,9 @@ class SaleLine(BaseModel):
     qty: float = Field(gt=0, le=1_000_000)
     discount: float = Field(default=0, ge=0, le=100)
     serials: list[str] = Field(default_factory=list, max_length=200)
+    price_override: float | None = Field(
+        default=None, ge=0, le=1e9
+    )  # needs sales.price.override; audited
 
 
 class QuoteIn(BaseModel):
@@ -150,6 +155,10 @@ def _qty_by_product(lines: list[dict[str, Any]]) -> dict[int, float]:
 def _check_discounts(user: User, lines: list[SaleLine]) -> None:
     if any(line.discount > 0 for line in lines) and not has_permission(user.role, P_DISCOUNT):
         raise api_error(403, "forbidden", "You do not have permission to give discounts")
+    if any(line.price_override is not None for line in lines) and not has_permission(
+        user.role, P_PRICE
+    ):
+        raise api_error(403, "forbidden", "You do not have permission to change prices")
 
 
 def _receipt(order: dict[str, Any], company: str | None, cashier: str) -> dict[str, Any]:
@@ -187,12 +196,51 @@ def lookup(
 @router.get("/products")
 def search_products(
     cid: uuid.UUID, config_id: int = Query(gt=0), q: str = Query("", max_length=100),
-    limit: int = Query(24, ge=1, le=50), user: User = Depends(require(P_SALES)),
-    db: Session = Depends(get_session), s: Settings = Depends(get_settings),
+    limit: int = Query(24, ge=1, le=50), category: int = Query(0, ge=0), offset: int = Query(0, ge=0, le=100_000),
+    user: User = Depends(require(P_SALES)), db: Session = Depends(get_session), s: Settings = Depends(get_settings),
     vault: SecretVault = Depends(get_vault),
 ) -> dict[str, Any]:  # fmt: skip
     _, client = _conn(db, user, cid, s, vault)
-    return _read(client, "sales_search", config_id, q, limit)
+    return _read(client, "sales_search", config_id, q, limit, category or "", offset)
+
+
+@router.get("/categories")
+def categories(
+    cid: uuid.UUID, config_id: int = Query(gt=0), user: User = Depends(require(P_SALES)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    _, client = _conn(db, user, cid, s, vault)
+    return _read(client, "sales_categories", config_id)
+
+
+@router.get("/products/{product_id}/image")
+def product_image(
+    cid: uuid.UUID, product_id: int, user: User = Depends(require(P_SALES)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> Response:  # fmt: skip
+    import base64
+
+    _, client = _conn(db, user, cid, s, vault)
+    got = _read(client, "sales_product_image", product_id)
+    if not got.get("found"):
+        raise api_error(404, "not_found", "No image")
+    raw = base64.b64decode(got["data"])
+    kind = (
+        "image/png"
+        if raw.startswith(b"\x89PNG")
+        else "image/jpeg"
+        if raw.startswith(b"\xff\xd8\xff")
+        else "image/webp"
+        if raw[8:12] == b"WEBP"
+        else None
+    )
+    if kind is None:
+        raise api_error(404, "not_found", "No image")
+    return Response(
+        content=raw,
+        media_type=kind,
+        headers={"Cache-Control": "private, max-age=600", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.post("/quote")
@@ -297,6 +345,7 @@ def checkout(
                  target_type="pos_order", target_id=order["id"],
                  after={"total": order["amount_total"], "lines": len(order["lines"]),
                         "discount": any(line.discount > 0 for line in body.lines),
+                        "price_override": any(line.price_override is not None for line in body.lines),
                         "on_credit": order.get("credit_amount", 0.0),
                         "credit_override": body.override_credit_limit})  # fmt: skip
     db.commit()

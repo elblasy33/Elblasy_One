@@ -22,6 +22,8 @@ READ_METHODS = frozenset(
         "catalog_categories",
         "production_recipes",
         "insights_snapshot",
+        "sales_categories",
+        "sales_product_image",
         "sorder_products",
         "sorder_quote",
         "sorder_get",

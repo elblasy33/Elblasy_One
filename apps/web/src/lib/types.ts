@@ -70,7 +70,7 @@ export interface PosConfig {
   id: number; name: string; session?: SessionView; payment_methods: { id: number; name: string; is_cash: boolean; is_credit?: boolean }[];
 }
 export interface SalesState { configs: PosConfig[]; currency: string; currency_decimals: number; stock_updates?: string; company?: string }
-export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean; tracking?: string }
+export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean; tracking?: string; has_image?: boolean }
 export interface QuoteLine { product_id: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
 export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string }
 export interface OrderLine { id?: number; refunded_qty?: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }

@@ -68,7 +68,7 @@ test("cashier day: open register, scan, pay with change, refund, close with a ca
   await expect(page.getByText("شاي ليبتون").first()).toBeVisible();
   await scan.fill(barcode);
   await scan.press("Enter");
-  await expect(page.getByLabel("الكمية")).toHaveValue("2");
+  await expect(page.getByText(/2 × /).first()).toBeVisible();
   await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 }); // total shown only once it matches the cart
   await expect(page.getByText("منها ضريبة")).toBeVisible(); // totals and tax come from Odoo
   await page.screenshot({ path: "e2e/shots/21-cart.png", fullPage: true });
@@ -145,4 +145,40 @@ test("cashier day: open register, scan, pay with change, refund, close with a ca
   const sessions = await odoo("pos.session", "search_read", [[["state", "=", "closed"]]], { fields: ["move_id"] });
   expect(sessions.length).toBeGreaterThan(0);
   expect(sessions.at(-1).move_id).toBeTruthy();
+});
+
+test("register conveniences: product grid, numpad quantity/price, parked orders that survive a reload", async ({ page }) => {
+  const { pid } = await seed(page.request);
+  await page.goto("/sales");
+  await page.getByLabel("النقدية الافتتاحية").fill("0");
+  await page.getByRole("button", { name: "فتح الخزنة" }).click();
+
+  // tap a tile (no barcode needed), then set the quantity on the numpad
+  const tile = page.getByRole("list", { name: "المنتجات" }).getByRole("button", { name: /شاي ليبتون/ }).first();
+  await expect(tile).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/27-register-grid.png", fullPage: true });
+  await tile.click();
+  await expect(page.getByText(/1 × /).first()).toBeVisible();
+  await page.getByRole("button", { name: "4", exact: true }).click();
+  await expect(page.getByText(/4 × /).first()).toBeVisible();
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+
+  // the owner may change the price: 4 x 30 = 120 before tax, and the change is flagged
+  await page.getByRole("radio", { name: "السعر" }).click();
+  await page.getByRole("button", { name: "3", exact: true }).click();
+  await page.getByRole("button", { name: "0", exact: true }).click();
+  await expect(page.getByText("30.00").first()).toBeVisible();
+  await expect(page.getByText("تغيير السعر مسجَّل في السجل.")).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/28-numpad.png", fullPage: true });
+
+  // park this order, serve someone else, come back; a reload keeps both
+  await page.getByRole("button", { name: /طلب جديد/ }).click();
+  await expect(page.getByText("السلة فارغة").first()).toBeVisible();
+  await page.getByRole("tab", { name: /طلب 1/ }).click();
+  await expect(page.getByText(/4 × /).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("tab", { name: /طلب 2/ })).toBeVisible();
+  await page.getByRole("tab", { name: /طلب 1/ }).click();
+  await expect(page.getByText(/4 × /).first()).toBeVisible();
+  expect(pid).toBeGreaterThan(0);
 });

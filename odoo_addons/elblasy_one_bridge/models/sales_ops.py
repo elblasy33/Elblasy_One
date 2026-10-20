@@ -187,6 +187,8 @@ class ElblasyBridgeSales(models.AbstractModel):
             qty = _num(raw.get("qty"), "quantity", minimum=0.0001, maximum=1e6)
             disc = _num(raw.get("discount", 0), "discount", maximum=100.0)
             unit = self._price_for(cfg, product, qty)
+            if raw.get("price_override") is not None:  # allowed only for authorised users (the platform checks and audits)
+                unit = _num(raw["price_override"], "price")
             taxes = product.taxes_id.filtered(lambda t: t.company_id == cfg.company_id)
             if fpos:
                 taxes = fpos.map_tax(taxes)
@@ -323,7 +325,7 @@ class ElblasyBridgeSales(models.AbstractModel):
         )
 
     @api.model
-    def sales_search(self, config_id, query, limit):
+    def sales_search(self, config_id, query, limit, category="", offset=0):
         """Sellable variants (a shoe in size 42 / black is one product here) for the register."""
         self._require_internal_user()
         self._need_pos()
@@ -334,8 +336,10 @@ class ElblasyBridgeSales(models.AbstractModel):
         if q:
             domain += ["|", "|", "|", ("name", "ilike", q), ("barcode", "ilike", q), ("default_code", "ilike", q),
                        ("product_template_attribute_value_ids.name", "ilike", q)]  # fmt: skip
+        if category:
+            domain += [("categ_id", "child_of", int(category))]
         out = []
-        for p in self.env["product.product"].search(domain, limit=limit, order="name, id"):
+        for p in self.env["product.product"].search(domain, limit=limit, offset=max(0, int(offset or 0)), order="name, id"):
             out.append(
                 {
                     "product_id": p.id,
@@ -345,9 +349,32 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "on_hand": p.qty_available if p.is_storable else None,
                     "by_weight": bool(p.to_weight) if "to_weight" in p._fields else False,
                     "tracking": p.tracking if "tracking" in p._fields else "none",
+                    "category_id": p.categ_id.id or None,
+                    "has_image": bool(p.image_128),
                 }
             )
         return wire({"items": out})
+
+    @api.model
+    def sales_categories(self, config_id):
+        """Product categories that have something sellable at this till (flat, with counts)."""
+        self._require_internal_user()
+        self._need_pos()
+        self._config(config_id)
+        rows = self.env["product.product"].read_group(
+            [("available_in_pos", "=", True), ("sale_ok", "=", True)], ["categ_id"], ["categ_id"], lazy=False
+        )
+        return wire({"items": [{"id": r["categ_id"][0], "name": r["categ_id"][1].split(" / ")[-1], "count": r["__count"]}
+                               for r in rows if r["categ_id"]]})  # fmt: skip
+
+    @api.model
+    def sales_product_image(self, product_id):
+        self._require_internal_user()
+        self._need_pos()
+        p = self.env["product.product"].browse(int(product_id or 0)).exists()
+        if not p or not p.image_128:
+            return wire({"found": False})
+        return wire({"found": True, "data": p.image_128.decode() if isinstance(p.image_128, bytes) else p.image_128})
 
     @api.model
     def sales_get_order(self, order_id):

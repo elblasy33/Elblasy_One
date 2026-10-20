@@ -556,3 +556,74 @@ def test_refund_request_flow_cashier_asks_manager_decides(shop):
     # requests for something that is not a paid sale are refused up front
     bad = cashier.post(f"{base}/orders/{oid}/refund-request", json=body, headers=idem())
     assert bad.status_code == 422
+
+
+def test_register_browse_by_category_page_images_and_price_override(shop):
+    import base64
+
+    from tests.integration.test_purchasing_live import login as login_role
+
+    client, cid, url, db, cfg, cash = shop
+    a, _ = product(client, cid, url, db, name="شاي", price=50, category="مشروبات")
+    b, _ = product(client, cid, url, db, name="عصير", price=20, category="مشروبات")
+    c, _ = product(client, cid, url, db, name="رز", price=30, category="بقالة")
+    base = f"/connections/{cid}/sales"
+    cats = {
+        x["name"]: x
+        for x in client.get(f"{base}/categories", params={"config_id": cfg}).json()["items"]
+    }
+    assert cats["مشروبات"]["count"] == 2 and cats["بقالة"]["count"] == 1
+    listed = client.get(
+        f"{base}/products", params={"config_id": cfg, "category": cats["مشروبات"]["id"]}
+    ).json()["items"]
+    assert sorted(x["name"] for x in listed) == ["شاي", "عصير"]
+    allp = client.get(f"{base}/products", params={"config_id": cfg}).json()[
+        "items"
+    ]  # no search text lists the till's products
+    assert len(allp) == 3
+    page2 = client.get(
+        f"{base}/products", params={"config_id": cfg, "limit": 2, "offset": 2}
+    ).json()["items"]
+    assert len(page2) == 1
+
+    assert client.get(f"{base}/products/{a}/image").status_code == 404
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    rpc(url, db)("product.product", "write", [a], {"image_1920": base64.b64encode(png).decode()})
+    img = client.get(f"{base}/products/{a}/image")
+    assert (
+        img.status_code == 200
+        and img.headers["content-type"] == "image/png"
+        and img.content[:4] == b"\x89PNG"
+    )
+    assert next(
+        x
+        for x in client.get(
+            f"{base}/products", params={"config_id": cfg, "category": cats["مشروبات"]["id"]}
+        ).json()["items"]
+        if x["product_id"] == a
+    )["has_image"]
+
+    # price override: authorised users only, applied by Odoo's tax engine, audited
+    open_register(client, cid, cfg)
+    line = {"product_id": a, "qty": 2, "price_override": 40}
+    q = client.post(f"{base}/quote", json={"config_id": cfg, "lines": [line]}).json()
+    assert q["lines"][0]["price_unit"] == 40 and abs(q["total"] - 80 * 1.14) < 0.02
+    sale = client.post(
+        f"{base}/orders",
+        json={
+            "config_id": cfg,
+            "lines": [line],
+            "expected_total": q["total"],
+            "payments": [{"payment_method_id": cash, "amount": 200}],
+        },
+        headers=idem(),
+    )
+    assert sale.status_code == 201, sale.text
+    assert sale.json()["order"]["lines"][0]["price_unit"] == 40
+    cashier = login_role(client, cid, "cashier")
+    assert (
+        cashier.post(f"{base}/quote", json={"config_id": cfg, "lines": [line]}).status_code == 403
+    )
+    assert any(x["action"] == "sales.order.create" for x in client.get("/audit").json()["items"])

@@ -1,6 +1,6 @@
 "use client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, CheckCircle2, History, Lock, Minus, Percent, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, UserRound, XCircle } from "lucide-react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Banknote, Delete, CheckCircle2, History, Lock, Minus, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { CustomerPicker } from "@/components/customer-picker";
@@ -14,7 +14,11 @@ import { errorText, useLang } from "@/lib/i18n";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
 import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
-interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number; tracking?: string; serials?: string[] }
+interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number; tracking?: string; serials?: string[]; override?: number; has_image?: boolean }
+interface Parked { cart: CartItem[]; customer: Customer | null; note: string }
+type Mode = "qty" | "disc" | "price";
+const PAGE = 24;
+const loadPark = (key: string): Parked[] => { try { const v = JSON.parse(localStorage.getItem(key) ?? "null") as Parked[] | null; return v && v.length ? v : [{ cart: [], customer: null, note: "" }]; } catch { return [{ cart: [], customer: null, note: "" }]; } };
 type Tab = "register" | "history";
 
 function errMsg(t: ReturnType<typeof useLang>["t"], e: unknown): { text: string; ref?: string } | null {
@@ -79,7 +83,21 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const session = cfg.session!;
   const dec = state.currency_decimals;
   const [tab, setTab] = useState<Tab>("register");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const parkKey = `pos-park-${session.id}`;
+  const [orders, setOrders] = useState<Parked[]>(() => loadPark(parkKey));
+  const [active, setActive] = useState(0);
+  const cur = orders[active] ?? orders[0]!;
+  const cart = cur.cart;
+  const customer = cur.customer;
+  const note = cur.note;
+  const patch = (p: Partial<Parked>) => setOrders((o) => o.map((x, i) => (i === active ? { ...x, ...p } : x)));
+  const setCart = (f: CartItem[] | ((c: CartItem[]) => CartItem[])) => setOrders((o) => o.map((x, i) => (i === active ? { ...x, cart: typeof f === "function" ? f(x.cart) : f } : x)));
+  const setCustomer = (c: Customer | null) => patch({ customer: c });
+  const setNote = (n: string) => patch({ note: n });
+  const [sel, setSel] = useState<number | null>(null);
+  const [mode, setMode] = useState<Mode>("qty");
+  const [buffer, setBuffer] = useState("");
+  const [category, setCategory] = useState(0);
   const [scan, setScan] = useState("");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -87,28 +105,36 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const [result, setResult] = useState<SaleResult | null>(null);
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState<CloseResult | null>(null);
-  const [customer, setCustomer] = useState<Customer | null>(null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
   const canDiscount = !!me.data?.permissions.includes("sales.discount");
+  const canPrice = !!me.data?.permissions.includes("sales.price.override");
+  useEffect(() => { try { if (orders.length === 1 && orders[0]!.cart.length === 0 && !orders[0]!.customer && !orders[0]!.note) localStorage.removeItem(parkKey); else localStorage.setItem(parkKey, JSON.stringify(orders)); } catch { /* storage unavailable */ } }, [orders, parkKey]);
 
   useEffect(() => { const id = setTimeout(() => setQuery(scan.trim()), 250); return () => clearTimeout(id); }, [scan]);
   useEffect(() => { if (tab === "register" && !paying && !result) scanRef.current?.focus(); }, [tab, paying, result, cart.length]);
 
-  const found = useQuery({
-    queryKey: ["register-search", cid, cfg.id, query],
-    queryFn: () => api<{ items: SaleProduct[] }>(`/connections/${cid}/sales/products?config_id=${cfg.id}&q=${encodeURIComponent(query)}&limit=12`),
-    enabled: query.length >= 2 && !/^\d{6,}$/.test(query),
+  const isCode = /^\d{6,}$/.test(query);
+  const list = useInfiniteQuery({
+    queryKey: ["register-products", cid, cfg.id, category, isCode ? "" : query],
+    queryFn: ({ pageParam }) => api<{ items: SaleProduct[] }>(`/connections/${cid}/sales/products?config_id=${cfg.id}&q=${encodeURIComponent(isCode ? "" : query)}&category=${category}&limit=${PAGE}&offset=${pageParam}`),
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => (last.items.length === PAGE ? all.length * PAGE : undefined),
+    enabled: !(query.length === 1),
+    placeholderData: (p) => p,
   });
-  const lines = cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount }));
+  const cats = useQuery({ queryKey: ["register-categories", cid, cfg.id], queryFn: () => api<{ items: { id: number; name: string; count: number }[] }>(`/connections/${cid}/sales/categories?config_id=${cfg.id}`), staleTime: 60_000 });
+  const products = (list.data?.pages ?? []).flatMap((p) => p.items);
+  const lines = cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}) }));
   const quote = useQuery({
     queryKey: ["quote", cid, cfg.id, JSON.stringify(lines)],
     queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines } }),
     enabled: cart.length > 0, placeholderData: (p) => p, retry: false,
   });
 
-  const add = (p: { product_id: number; name: string; price: number; by_weight: boolean; tracking?: string }, qty = 1) => {
+  const add = (p: { product_id: number; name: string; price: number; by_weight: boolean; tracking?: string; has_image?: boolean }, qty = 1) => {
     setNotice(null);
+    setSel(p.product_id); setBuffer(""); setMode("qty");
     setCart((c) => {
       const i = c.findIndex((x) => x.product_id === p.product_id);
       if (i >= 0) return c.map((x, j) => (j === i ? { ...x, qty: Math.round((x.qty + qty) * 1000) / 1000, ...(p.tracking === "serial" ? { serials: [...(x.serials ?? []), ""] } : {}) } : x));
@@ -132,7 +158,38 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
     return { ...x, qty: Math.max(0.001, Math.round(qty * 1000) / 1000) };
   }));
   const remove = (id: number) => setCart((c) => c.filter((x) => x.product_id !== id));
-  const newSale = () => { setResult(null); setCart([]); setCustomer(null); setScan(""); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["sales-summary", cid] }); };
+  const newSale = () => { setResult(null); setOrders((o) => (o.length > 1 ? o.filter((_, i) => i !== active) : [{ cart: [], customer: null, note: "" }])); setActive(0); setSel(null); setScan(""); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["sales-summary", cid] }); };
+  const selected = cart.find((c) => c.product_id === sel);
+  const apply = (buf: string, m: Mode, item: CartItem) => {
+    const n = Number(buf === "" || buf === "." ? 0 : buf);
+    if (m === "qty") { if (n > 0) setQty(item.product_id, item.tracking === "serial" ? Math.round(n) : n); }
+    else if (m === "disc") setCart((c) => c.map((x) => (x.product_id === item.product_id ? { ...x, discount: Math.min(100, n) } : x)));
+    else setCart((c) => c.map((x) => (x.product_id === item.product_id ? { ...x, override: buf === "" ? undefined : n } : x)));
+  };
+  const press = (k: string) => {
+    if (!selected) return;
+    let next = buffer;
+    if (k === "back") next = buffer.slice(0, -1);
+    else if (k === "clear") next = "";
+    else if (k === "." ) next = buffer.includes(".") ? buffer : `${buffer || "0"}.`;
+    else next = `${buffer}${k}`.replace(/^0+(?=\d)/, "").slice(0, 9);
+    setBuffer(next);
+    apply(next, mode, selected);
+  };
+  const pickMode = (m: Mode) => { setMode(m); setBuffer(""); };
+  const pickLine = (id: number) => { setSel(id); setBuffer(""); setMode("qty"); };
+  const payable = cart.length > 0 && !!quote.data && !(quote.isPlaceholderData || quote.isFetching) && !cart.some((c) => c.tracking === "serial" && (c.serials ?? []).some((v) => !v.trim()));
+  const parkNew = () => { setOrders((o) => [...o, { cart: [], customer: null, note: "" }]); setActive(orders.length); setSel(null); setScan(""); };
+  const closeOrder = (i: number) => { setOrders((o) => (o.length > 1 ? o.filter((_, j) => j !== i) : [{ cart: [], customer: null, note: "" }])); setActive((a) => Math.max(0, a >= i && a > 0 ? a - 1 : a)); setSel(null); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (tab !== "register" || result || closing || closed) return;
+      if (e.key === "F2") { e.preventDefault(); scanRef.current?.focus(); }
+      if (e.key === "F4" && payable && !paying) { e.preventDefault(); setPaying(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, result, closing, closed, payable, paying]);
   const stale = quote.isPlaceholderData || quote.isFetching; // never show a total that no longer matches the cart
   const qLine = (id: number) => (stale ? undefined : quote.data?.lines.find((l) => l.product_id === id));
   const total = quote.data?.total ?? 0;
@@ -175,31 +232,56 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
       </header>
 
       {tab === "history" ? <History_ cid={cid} sessionId={session.id} cashId={cfg.payment_methods.find((m) => m.is_cash)?.id} currency={state.currency} dec={dec} canRefund={!!me.data?.permissions.includes("sales.returns")} /> : (
-        <div className="grid gap-4 lg:grid-cols-[1fr_24rem]">
-          <section className="space-y-3">
+        <div className="grid gap-4 lg:grid-cols-[1fr_25rem]">
+          <section className="min-w-0 space-y-3">
             <form onSubmit={doScan} className="relative">
               <ScanBarcode className="pointer-events-none absolute start-4 top-1/2 size-6 -translate-y-1/2 text-brand" aria-hidden />
               <input ref={scanRef} value={scan} onChange={(e) => { setScan(e.target.value); setNotice(null); }} placeholder={t("pos_scan")} aria-label={t("pos_scan")} autoComplete="off" inputMode="search"
-                className="min-h-14 w-full rounded-2xl border-2 border-line bg-surface ps-14 pe-4 text-lg outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
+                className="min-h-14 w-full rounded-2xl border-2 border-line bg-surface ps-14 pe-16 text-lg outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
+              <kbd className="pointer-events-none absolute end-4 top-1/2 hidden -translate-y-1/2 rounded-lg border border-line px-2 py-0.5 text-xs text-soft md:block">F2</kbd>
             </form>
             {notice && <p role="alert" className="font-bold text-bad">{notice}</p>}
-            {found.data && (
-              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {found.data.items.map((p) => (
-                  <li key={p.product_id}>
-                    <button onClick={() => { add(p); setScan(""); }} className="flex min-h-24 w-full flex-col justify-between rounded-2xl border border-line bg-surface p-3 text-start transition hover:border-brand hover:bg-brandsoft active:scale-[0.98]">
-                      <span className="line-clamp-2 font-bold" dir="auto">{p.name}</span>
-                      <span className="flex items-center justify-between text-sm"><span className="font-black text-brand" dir="ltr">{money(p.price, dec)}</span>
-                        {p.on_hand !== undefined && <span className={cn("text-xs", p.on_hand <= 0 ? "text-bad" : "text-soft")}>{t("pos_stock_low")}: {p.on_hand}</span>}</span>
-                    </button>
-                  </li>
+            {(cats.data?.items.length ?? 0) > 1 && (
+              <div role="tablist" aria-label={t("pos_categories")} className="flex gap-2 overflow-x-auto pb-1">
+                {[{ id: 0, name: t("pos_all"), count: 0 }, ...(cats.data?.items ?? [])].map((c) => (
+                  <button key={c.id} role="tab" aria-selected={category === c.id} onClick={() => setCategory(c.id)}
+                    className={cn("min-h-11 shrink-0 rounded-2xl border-2 px-4 font-bold", category === c.id ? "border-brand bg-brandsoft text-brand" : "border-line bg-surface text-soft hover:bg-surface2")}>{c.name}</button>
                 ))}
-              </ul>
+              </div>
             )}
-            {!found.data && cart.length === 0 && <Card className="py-10 text-center text-soft"><Search className="mx-auto mb-2 size-8" aria-hidden />{t("pos_empty_cart")}</Card>}
+            {list.isLoading && <Spinner label={t("loading")} />}
+            {list.data && products.length === 0 && <Card className="py-10 text-center text-soft"><Search className="mx-auto mb-2 size-8" aria-hidden />{t("pos_no_products")}</Card>}
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4" aria-label={t("pos_products")}>
+              {products.map((p) => (
+                <li key={p.product_id}>
+                  <button onClick={() => { add(p); setScan(""); }} className="group flex h-full min-h-28 w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface text-start transition hover:border-brand active:scale-[0.98]">
+                    <span className="relative grid h-20 w-full place-items-center bg-surface2">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- session-protected API image; next/image cannot send the cookie */}
+                      {p.has_image ? <img src={`/api/connections/${cid}/sales/products/${p.product_id}/image`} alt="" loading="lazy" className="size-full object-cover" />
+                        : <span className="text-3xl font-black text-soft/60" aria-hidden>{[...p.name][0]}</span>}
+                      {p.on_hand !== undefined && p.on_hand !== null && <span className={cn("absolute end-1 top-1 rounded-full px-2 text-[11px] font-bold", p.on_hand <= 0 ? "bg-badsoft text-bad" : "bg-surface/90 text-soft")}>{p.on_hand}</span>}
+                    </span>
+                    <span className="flex flex-1 flex-col justify-between gap-1 p-2.5">
+                      <span className="line-clamp-2 text-sm font-bold leading-snug" dir="auto">{p.name}</span>
+                      <span className="font-black text-brand" dir="ltr">{money(p.price, dec)}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {list.hasNextPage && <Button variant="ghost" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} className="w-full">{t("pos_more")}</Button>}
           </section>
 
           <aside className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            <div className="flex items-center gap-1.5 overflow-x-auto" role="tablist" aria-label={t("pos_orders")}>
+              {orders.map((o, i) => (
+                <span key={i} className={cn("flex shrink-0 items-center rounded-xl border-2", i === active ? "border-brand bg-brandsoft" : "border-line bg-surface")}>
+                  <button role="tab" aria-selected={i === active} onClick={() => { setActive(i); setSel(null); setBuffer(""); }} className="min-h-10 px-3 text-sm font-bold">{t("pos_order")} {i + 1}{o.cart.length ? ` · ${o.cart.length}` : ""}</button>
+                  {orders.length > 1 && <button aria-label={t("pos_clear")} onClick={() => closeOrder(i)} className="grid size-8 place-items-center text-soft hover:text-bad"><XCircle className="size-4" aria-hidden /></button>}
+                </span>
+              ))}
+              <button onClick={parkNew} aria-label={t("pos_new_order")} title={t("pos_new_order")} className="grid size-10 shrink-0 place-items-center rounded-xl border-2 border-dashed border-line text-soft hover:border-brand hover:text-brand"><Plus className="size-4" aria-hidden /></button>
+            </div>
             {cfg.payment_methods.some((m) => m.is_credit) && (
               <button onClick={() => setPickingCustomer(true)} className="flex min-h-12 w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 font-bold hover:bg-surface2">
                 <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}</span>
@@ -210,22 +292,16 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                 <ul className="divide-y divide-line">
                   {cart.map((c) => {
                     const ql = qLine(c.product_id);
+                    const on = c.product_id === sel;
                     return (
-                      <li key={c.product_id} className="space-y-2 py-3">
+                      <li key={c.product_id} className={cn("-mx-2 space-y-2 rounded-xl px-2 py-3", on && "bg-brandsoft/60")}>
                         <div className="flex items-start justify-between gap-2">
-                          <span className="font-bold" dir="auto">{c.name}</span>
+                          <button onClick={() => pickLine(c.product_id)} className="min-w-0 flex-1 text-start" aria-pressed={on}>
+                            <span className="block font-bold" dir="auto">{c.name}</span>
+                            <span className="text-xs text-soft" dir="ltr">{c.qty} × {c.override !== undefined ? <><s>{money(c.price, dec)}</s> <b className="text-warn">{money(c.override, dec)}</b></> : money(c.price, dec)}{c.discount ? ` − ${c.discount}%` : ""}</span>
+                          </button>
                           <span className="font-black" dir="ltr">{ql ? money(ql.subtotal_incl, dec) : "…"}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button aria-label="−" onClick={() => setQty(c.product_id, c.qty - (c.by_weight ? 0.1 : 1))} className="grid size-10 place-items-center rounded-xl border border-line"><Minus className="size-4" aria-hidden /></button>
-                          <input aria-label={t("pos_qty")} type="number" inputMode="decimal" min="0.001" step={c.by_weight ? "0.001" : "1"} value={c.qty} onChange={(e) => setQty(c.product_id, Number(e.target.value) || 0.001)} dir="ltr" className="min-h-10 w-20 rounded-xl border border-line bg-surface px-2 text-center font-bold" />
-                          <button aria-label="+" onClick={() => setQty(c.product_id, c.qty + (c.by_weight ? 0.1 : 1))} className="grid size-10 place-items-center rounded-xl border border-line"><Plus className="size-4" aria-hidden /></button>
-                          {c.by_weight && <Badge tone="brand">kg</Badge>}
-                          {canDiscount && (
-                            <label className="ms-auto flex items-center gap-1 text-xs text-soft"><Percent className="size-3" aria-hidden />
-                              <input aria-label={t("pos_discount")} type="number" min="0" max="100" value={c.discount || ""} placeholder="0" onChange={(e) => setCart(cart.map((x) => (x.product_id === c.product_id ? { ...x, discount: Math.min(100, Math.max(0, Number(e.target.value) || 0)) } : x)))} dir="ltr" className="min-h-10 w-14 rounded-xl border border-line bg-surface px-2 text-center" /></label>
-                          )}
-                          <button aria-label="remove" onClick={() => remove(c.product_id)} className="grid size-10 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-4" aria-hidden /></button>
+                          <button aria-label="remove" onClick={() => { remove(c.product_id); if (sel === c.product_id) setSel(null); }} className="grid size-9 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-4" aria-hidden /></button>
                         </div>
                         {c.tracking === "serial" && (
                           <div className="space-y-1">
@@ -250,14 +326,38 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                 </div>
               )}
             </Card>
-            <Button onClick={() => setPaying(true)} disabled={!quote.data || stale || cart.length === 0 || cart.some((c) => c.tracking === "serial" && (c.serials ?? []).some((v) => !v.trim()))} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")}</Button>
-            {cart.length > 0 && <button onClick={() => setCart([])} className="w-full text-sm font-bold text-soft hover:text-bad">{t("pos_clear")}</button>}
+            {selected && (
+              <Card className="space-y-2 p-3" aria-label={t("pos_numpad")}>
+                <div role="radiogroup" aria-label={t("pos_mode")} className="grid grid-cols-3 gap-1.5">
+                  {([["qty", t("pos_qty")], ...(canDiscount ? [["disc", t("pos_discount")]] : []), ...(canPrice ? [["price", t("pos_price")]] : [])] as [Mode, string][]).map(([m, label]) => (
+                    <button key={m} role="radio" aria-checked={mode === m} onClick={() => pickMode(m)} className={cn("min-h-10 rounded-xl border-2 text-sm font-bold", mode === m ? "border-brand bg-brandsoft text-brand" : "border-line text-soft")}>{label}</button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 gap-1.5" dir="ltr">
+                  {["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "back"].map((k) => (
+                    <button key={k} onClick={() => press(k)} aria-label={k === "back" ? "backspace" : k} className="grid min-h-12 place-items-center rounded-xl border border-line bg-surface text-xl font-black active:bg-brandsoft">{k === "back" ? <Delete className="size-5" aria-hidden /> : k}</button>
+                  ))}
+                </div>
+                {mode === "price" && <p className="text-xs text-warn">{t("pos_price_note")}</p>}
+                <div className="flex items-center justify-between gap-2">
+                  <button onClick={() => press("clear")} className="text-sm font-bold text-soft hover:text-ink">{t("pos_numpad_clear")}</button>
+                  <span className="flex items-center gap-1">
+                    <button aria-label="−" onClick={() => setQty(selected.product_id, selected.qty - (selected.by_weight ? 0.1 : 1))} className="grid size-10 place-items-center rounded-xl border border-line"><Minus className="size-4" aria-hidden /></button>
+                    <b className="w-14 text-center" dir="ltr">{selected.qty}</b>
+                    <button aria-label="+" onClick={() => setQty(selected.product_id, selected.qty + (selected.by_weight ? 0.1 : 1))} className="grid size-10 place-items-center rounded-xl border border-line"><Plus className="size-4" aria-hidden /></button>
+                  </span>
+                </div>
+              </Card>
+            )}
+            {cart.length > 0 && <input aria-label={t("pos_note")} placeholder={t("pos_note")} value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="min-h-11 w-full rounded-2xl border border-line bg-surface px-4 text-sm outline-none focus:border-brand" />}
+            <Button onClick={() => setPaying(true)} disabled={!payable} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">F4</kbd></Button>
+            {cart.length > 0 && <button onClick={() => { setCart([]); setSel(null); }} className="w-full text-sm font-bold text-soft hover:text-bad">{t("pos_clear")}</button>}
           </aside>
         </div>
       )}
 
       {paying && quote.data && (
-        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
+        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} note={note} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
           onDone={(r) => { setPaying(false); setResult(r); }} onRefresh={() => void quote.refetch()} />
       )}
       {pickingCustomer && <CustomerPicker cid={cid} onPick={(c) => { setCustomer(c); setPickingCustomer(false); }} onClose={() => setPickingCustomer(false)} />}
@@ -278,7 +378,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function PayDialog({ cid, cfg, cart, customer, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
+function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; note: string; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
   const { t } = useLang();
   const keyFor = useIdempotencyKey();
   const normal = cfg.payment_methods.filter((m) => !m.is_credit);
@@ -300,7 +400,7 @@ function PayDialog({ cid, cfg, cart, customer, canOverride, total, currency, dec
     ...(due > 0 ? [{ payment_method_id: method, amount: paid }] : []),
     ...(onCredit && creditMethod ? [{ payment_method_id: creditMethod.id, amount: credit }] : []),
   ];
-  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
+  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}), ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(note.trim() ? { note: note.trim() } : {}), ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
     mutationFn: () => api<SaleResult>(`/connections/${cid}/sales/orders`, { body: payload, headers: { "Idempotency-Key": keyFor(payload) } }),
     onSuccess: onDone,

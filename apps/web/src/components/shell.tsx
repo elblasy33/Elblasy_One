@@ -78,7 +78,7 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
         </div>
       </aside>
       <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-10 md:pb-10">
-        <div className={cn("mx-auto w-full transition-[max-width] duration-300", slim ? "max-w-6xl" : "max-w-4xl")}>{children}</div>
+        <div className={cn("mx-auto w-full transition-[max-width] duration-300", slim || path === "/sales" ? "max-w-7xl" : "max-w-4xl")}>{children}</div>
       </main>
       <nav aria-label={t("nav_menu")} className="fixed inset-x-0 bottom-0 z-20 flex border-t border-line bg-surface/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
         {items.map((i) => {

@@ -33,6 +33,7 @@ P_PURCHASING_VIEW = "purchasing.view"
 P_STOCK_APPROVE = "inventory.approve"
 P_EXPENSE_APPROVE = "expenses.approve"
 P_CUSTOMERS = "customers.manage"
+P_PRICE = "sales.price.override"  # change a line price at the till
 P_SALES_ORDERS = "sales.orders"  # manual (wholesale / on-credit) sales orders
 
 ALL = {
@@ -42,6 +43,7 @@ ALL = {
     P_EXPENSE_APPROVE,
     P_CUSTOMERS,
     P_SALES_ORDERS,
+    P_PRICE,
 }  # fmt: skip
 
 PERMISSIONS: dict[Role, frozenset[str]] = {

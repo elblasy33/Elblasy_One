@@ -33,6 +33,13 @@ labels), `POST /sales/quote` (Odoo's pricelist + tax engine), `/sales/orders`, `
 Odoo 19 stores change (`amount_return`) as a negative number, Odoo 18 as positive; the internal-note field is `internal_note` (19) /
 `general_note` (18); session numbering differs. All isolated in small helpers.
 
+## The register screen (compared with Odoo's POS)
+Product grid with category tabs, image tiles (served through the session-protected `/sales/products/{id}/image`), live stock badge and
+"show more"; barcode/search box (F2); a numpad on the selected line with quantity, discount % (needs `sales.discount`) and price
+(needs `sales.price.override`, audited as `price_override`) modes; several open orders (park the current one and serve someone else,
+kept in the browser per session, so a reload does not lose them); an order note; F4 to pay. What Odoo's own POS has that this does
+not: cash in/out from the drawer, product combos, per-line notes, kitchen/printer routing, offline operation, loyalty and gift cards.
+
 ## Partial refunds and refund requests
 `lines: [{line_id, qty}]` refunds chosen quantities (empty = everything still refundable); a line can be refunded in several steps but never
 beyond what was sold. A cashier has no `sales.returns` permission: they *ask*, and a manager/owner approves or rejects from the register's
