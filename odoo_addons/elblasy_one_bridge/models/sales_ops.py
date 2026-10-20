@@ -211,6 +211,74 @@ class ElblasyBridgeSales(models.AbstractModel):
         return quoted, currency.round(total), currency.round(tax_total)
 
     @api.model
+    def _order_lines(self, cfg, key, quoted, raw_lines):
+        """Order lines for sync_from_ui. A lot-tracked line is split into one line per lot (first expiry
+        first); the money is split in proportion so the order total is unchanged."""
+        cur = cfg.currency_id
+        out, n = [], 0
+        for i, q in enumerate(quoted):
+            product = self.env["product.product"].browse(q["product_id"])
+            packs = self._pack_lots(cfg, product, q["qty"], (raw_lines[i] or {}).get("serials"))
+            chunks = packs if product.tracking == "lot" else [(None, q["qty"])]
+            left_ex, left_in = q["subtotal"], q["subtotal_incl"]
+            for j, (lot_name, qty) in enumerate(chunks):
+                last = j == len(chunks) - 1
+                ex = left_ex if last else cur.round(q["subtotal"] * qty / q["qty"])
+                inc = left_in if last else cur.round(q["subtotal_incl"] * qty / q["qty"])
+                left_ex, left_in = left_ex - ex, left_in - inc
+                lots = [[0, 0, {"lot_name": lot_name}]] if lot_name else (packs if product.tracking == "serial" else [])
+                out.append([0, 0, {
+                    "uuid": f"{key[:24]}{n:08x}", "product_id": q["product_id"], "qty": qty, "price_unit": q["price_unit"],
+                    "discount": q["discount"], "price_subtotal": ex, "price_subtotal_incl": inc,
+                    "tax_ids": [[6, 0, q["tax_ids"]]], "full_product_name": q["name"], "pack_lot_ids": lots,
+                }])  # fmt: skip
+                n += 1
+        return out
+
+    @api.model
+    def _pack_lots(self, cfg, product, qty, serials):
+        """Lot/serial entries for a tracked product sold at the till (serial: [[0,0,{lot_name}]...];
+        lot: [(lot_name, qty)...] because Odoo's POS books one lot per order line). Serial goods need the exact serial
+        numbers (each must be in stock); lot goods are taken first-expired-first-out and never from an
+        expired lot. Untracked products need nothing."""
+        tracking = product.tracking if "tracking" in product._fields else "none"
+        if tracking == "none":
+            return []
+        if abs(qty - round(qty)) > 1e-9:
+            raise UserError(f"'{product.display_name}' is tracked: it is sold in whole units.")
+        qty = int(round(qty))
+        loc = cfg.picking_type_id.default_location_src_id or cfg.warehouse_id.lot_stock_id
+        Quant = self.env["stock.quant"]
+        if tracking == "serial":
+            serials = [str(x).strip() for x in (serials or []) if str(x).strip()]
+            if len(serials) != qty or len(set(serials)) != qty:
+                raise UserError(f"SERIALS_REQUIRED: '{product.display_name}' needs {qty} different serial number(s).")
+            for sn in serials:
+                have = Quant.search_count([("product_id", "=", product.id), ("location_id", "child_of", loc.id),
+                                           ("lot_id.name", "=", sn), ("quantity", ">", 0)])  # fmt: skip
+                if not have:
+                    raise UserError(f"SERIAL_NOT_IN_STOCK: serial {sn} of '{product.display_name}' is not in stock.")
+            return [[0, 0, {"lot_name": sn}] for sn in serials]
+        now = fields.Datetime.now()
+        quants = Quant.search([("product_id", "=", product.id), ("location_id", "child_of", loc.id),
+                               ("lot_id", "!=", False), ("quantity", ">", 0)])  # fmt: skip
+        usable = quants.filtered(lambda q: not (q.lot_id.expiration_date if "expiration_date" in q.lot_id._fields else False)
+                                 or q.lot_id.expiration_date >= now)  # fmt: skip
+        far = datetime.datetime.max
+        usable = usable.sorted(key=lambda q: ((q.lot_id.expiration_date if "expiration_date" in q.lot_id._fields and q.lot_id.expiration_date else far), q.lot_id.id))
+        out, need = [], qty
+        for q in usable:
+            take = min(need, int(q.quantity))
+            if take > 0:
+                out.append((q.lot_id.name, take))  # Odoo's POS takes one lot per order line
+            need -= take
+            if need <= 0:
+                break
+        if need > 0:
+            raise UserError(f"LOT_STOCK_SHORT: '{product.display_name}' has too little usable (non-expired) lot stock for {qty}.")
+        return out
+
+    @api.model
     def sales_quote(self, spec):
         """Authoritative totals from Odoo's own pricelist/tax engine. Read-only."""
         self._require_internal_user()
@@ -249,6 +317,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                 "price": self._price_for(cfg, product, qty),
                 "qty": qty,
                 "by_weight": bool(product.to_weight) if "to_weight" in product._fields else False,
+                "tracking": product.tracking if "tracking" in product._fields else "none",
                 "barcode": product.barcode or None,
             }
         )
@@ -275,6 +344,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "price": self._price_for(cfg, p, 1.0),
                     "on_hand": p.qty_available if p.is_storable else None,
                     "by_weight": bool(p.to_weight) if "to_weight" in p._fields else False,
+                    "tracking": p.tracking if "tracking" in p._fields else "none",
                 }
             )
         return wire({"items": out})
@@ -445,20 +515,7 @@ class ElblasyBridgeSales(models.AbstractModel):
             "partner_id": partner.id if partner else False,
             "to_invoice": credit_amt > 0,  # the credit part becomes an open invoice for the customer
             "sequence_number": 1,
-            "lines": [
-                [0, 0, {
-                    "uuid": f"{key[:24]}{i:08x}",
-                    "product_id": q["product_id"],
-                    "qty": q["qty"],
-                    "price_unit": q["price_unit"],
-                    "discount": q["discount"],
-                    "price_subtotal": q["subtotal"],
-                    "price_subtotal_incl": q["subtotal_incl"],
-                    "tax_ids": [[6, 0, q["tax_ids"]]],
-                    "full_product_name": q["name"],
-                }]
-                for i, q in enumerate(quoted)
-            ],
+            "lines": self._order_lines(cfg, key, quoted, spec["lines"]),
             "payment_ids": [[0, 0, v] for v in pay_vals],
         }
         note_field = self._note_field()
@@ -473,6 +530,16 @@ class ElblasyBridgeSales(models.AbstractModel):
         if not created:
             raise UserError("Odoo did not create the order.")
         return wire({"outcome": "created", "refs": {"order": self._order_view(created)}})
+
+    @api.model
+    def _refund_lot_names(self, line, qty):
+        if line.product_id.tracking == "none":
+            return []
+        back = set(line.refund_orderline_ids.mapped("pack_lot_ids.lot_name"))
+        names = [p.lot_name for p in line.pack_lot_ids]
+        if line.product_id.tracking == "serial":
+            names = [n for n in names if n not in back]
+        return names[:1] if line.product_id.tracking == "lot" else names[: int(round(qty))]
 
     @api.model
     def sales_refund(self, op_id, key, spec):
@@ -549,6 +616,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "tax_ids": [[6, 0, l.tax_ids.ids]],
                     "full_product_name": l.full_product_name or l.product_id.display_name,
                     "refunded_orderline_id": l.id,
+                    "pack_lot_ids": [[0, 0, {"lot_name": n}] for n in self._refund_lot_names(l, q)],
                 }]
                 for i, (l, q) in enumerate(picked)
             ],

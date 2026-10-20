@@ -1,6 +1,7 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowRight, RefreshCw, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { Badge, Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useLang, type TKey } from "@/lib/i18n";
@@ -14,7 +15,8 @@ type Rich = Finding & { evidence?: Record<string, unknown>; confidence?: string;
 export default function ReadinessPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const cid = useConnections().data?.find((c) => c.status === "active")?.id;
+  const conn = useConnections().data?.find((c) => c.status === "active");
+  const cid = conn?.id;
   const r = useReadiness(cid);
   if (!cid || r.isLoading) return <Spinner label={t("loading")} />;
   const d = r.data;
@@ -32,6 +34,12 @@ export default function ReadinessPage() {
               <Badge tone={d.summary.blocking_issues_absent ? "ok" : "bad"}>{d.summary.blocking_issues_absent ? t("rdy_ok") : t("rdy_blocking")}</Badge></div>
             <p className="text-sm text-soft">{t(`env_note_${d.environment}` as TKey)}</p>
           </Card>
+          {conn?.mode === "existing" && (
+            <Card className="flex flex-wrap items-center justify-between gap-3 border-brand/30 bg-brandsoft">
+              <div><p className="font-black">{t("rdy_existing_title")}</p><p className="text-sm text-soft">{t("rdy_existing_sub")}</p></div>
+              <Link href="/settings/setup" className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-brand px-4 font-bold text-brandink hover:brightness-110">{t("rdy_existing_go")} <ArrowRight className="size-4 rtl:rotate-180" aria-hidden /></Link>
+            </Card>
+          )}
           {findings.length === 0 && <Card className="py-8 text-center text-soft">{t("rdy_none")}</Card>}
           {SUBS.map((sub) => {
             const rows = findings.filter((f) => f.subsystem === sub);

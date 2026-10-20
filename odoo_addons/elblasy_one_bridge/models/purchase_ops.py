@@ -298,7 +298,14 @@ class ElblasyBridgePurchase(models.AbstractModel):
             remaining = pol.product_qty - pol.qty_received
             if qty > remaining + TOLERANCE:
                 raise UserError(f"'{pol.product_id.display_name}': {qty} exceeds the {remaining} still expected.")
-            if pol.product_id.tracking != "none" and not _text(l.get("lot_name"), "lot number", 80, required=False):
+            if pol.product_id.tracking == "serial":
+                sn = [str(x).strip() for x in (l.get("serials") or []) if str(x).strip()]
+                if abs(qty - round(qty)) > 1e-9 or len(sn) != int(round(qty)) or len(set(sn)) != len(sn):
+                    raise UserError(f"'{pol.product_id.display_name}' is tracked by serial: enter {qty:g} different serial numbers.")
+                taken = self.env["stock.lot"].search_count([("product_id", "=", pol.product_id.id), ("name", "in", sn)])
+                if taken:
+                    raise UserError(f"'{pol.product_id.display_name}': a serial number is already registered.")
+            elif pol.product_id.tracking != "none" and not _text(l.get("lot_name"), "lot number", 80, required=False):
                 raise UserError(f"'{pol.product_id.display_name}' is tracked: enter the lot number.")
         done_picking = None
         for pk in pickings:
@@ -312,7 +319,15 @@ class ElblasyBridgePurchase(models.AbstractModel):
                 req = wanted[m.purchase_line_id.id]
                 qty = _num(req["qty"], "received quantity", minimum=0.0001)
                 lot = _text(req.get("lot_name"), "lot number", 80, required=False)
-                if lot:
+                if m.product_id.tracking == "serial":
+                    m.move_line_ids.unlink()
+                    for sn in [str(x).strip() for x in req["serials"] if str(x).strip()]:
+                        self.env["stock.move.line"].create({
+                            "move_id": m.id, "picking_id": pk.id, "product_id": m.product_id.id,
+                            "location_id": m.location_id.id, "location_dest_id": m.location_dest_id.id,
+                            "quantity": 1, "lot_name": sn, "product_uom_id": m.product_uom.id,
+                        })  # fmt: skip
+                elif lot:
                     m.move_line_ids.unlink()
                     self.env["stock.move.line"].create({
                         "move_id": m.id, "picking_id": pk.id, "product_id": m.product_id.id,
@@ -436,6 +451,8 @@ class ElblasyBridgePurchase(models.AbstractModel):
             raise UserError("Only a confirmed order can be billed.")
         if po.invoice_status != "to invoice":
             raise UserError("Nothing is left to bill: receive the goods first, or everything received is already billed.")
+        if po.amount_total <= 0:
+            raise UserError("The order's value is zero, so there is nothing to bill: set the prices on the order first.")
         action = po.action_create_invoice()
         bill = self.env["account.move"].browse(action.get("res_id") or 0)
         if not bill and action.get("domain"):

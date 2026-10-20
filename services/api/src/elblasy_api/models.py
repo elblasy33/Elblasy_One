@@ -62,6 +62,9 @@ class OdooConnection(Base):
     login: Mapped[str] = mapped_column(String(200))
     secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | revoked
+    mode: Mapped[str] = mapped_column(
+        String(16), default="new", server_default="new"
+    )  # new | existing
     odoo_series: Mapped[str | None] = mapped_column(String(16))
     odoo_edition: Mapped[str | None] = mapped_column(String(16))
     compatibility_status: Mapped[str] = mapped_column(String(32), default="unknown")

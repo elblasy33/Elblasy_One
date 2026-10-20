@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Vertical = Literal["grocery", "bookstore", "shoes", "clothing", "general"]
+Vertical = Literal["grocery", "bookstore", "shoes", "clothing", "electronics", "general"]
 PayMethod = Literal["cash", "card", "wallet", "bank_transfer"]
 
 
@@ -22,6 +22,7 @@ class BusinessProfile(BaseModel):
     sells_on_credit: bool = False
     buys_on_credit: bool = True
     multiple_uom: bool = False
+    tracks_serials: bool | None = None  # None -> template default (electronics: yes)
     payment_methods: list[PayMethod] = Field(default=["cash"])
     branches: int = Field(default=1, ge=1, le=100)
 
@@ -41,7 +42,7 @@ QUESTIONS: tuple[Question, ...] = (
         "vertical",
         "choice",
         {"ar": "ما نوع نشاطك؟", "en": "What kind of business do you run?"},
-        ("grocery", "bookstore", "shoes", "clothing", "general"),
+        ("grocery", "bookstore", "shoes", "clothing", "electronics", "general"),
     ),
     Question(
         "makes_own_products",
@@ -72,6 +73,16 @@ QUESTIONS: tuple[Question, ...] = (
         "bool",
         {"ar": "هل للمنتج الواحد مقاسات أو ألوان؟", "en": "Do products come in sizes or colours?"},
         when={"vertical": ["general", "bookstore", "grocery"]},
+        default=False,
+    ),
+    Question(
+        "tracks_serials",
+        "bool",
+        {
+            "ar": "هل تتابع كل قطعة برقم تسلسلي (سيريال/IMEI)؟",
+            "en": "Do you track each item by serial number (serial/IMEI)?",
+        },
+        when={"vertical": ["electronics", "general"]},
         default=False,
     ),
     Question(

@@ -52,6 +52,7 @@ export default function NewProductPage() {
   const [hasVariants, setHasVariants] = useState(false);
   const [attrs, setAttrs] = useState<Attr[]>([{ name: "", values: "" }]);
   const [lot, setLot] = useState(false);
+  const [serial, setSerial] = useState(false);
   const [pos, setPos] = useState(true);
   const [made, setMade] = useState(false);
   const [done, setDone] = useState<CreatedProduct | null>(null);
@@ -68,7 +69,7 @@ export default function NewProductPage() {
     ...(mode === "scale" && byWeight ? { auto_barcode: "scale" } : {}),
     ...(category.trim() ? { category: category.trim() } : {}),
     ...(sku.trim() ? { sku: sku.trim() } : {}),
-    ...(lot ? { tracking: "lot" } : {}), pos,
+    ...(serial ? { tracking: "serial" } : lot ? { tracking: "lot" } : {}), pos,
     ...(hasVariants ? { variants: attrs.filter((a) => a.name.trim() && splitValues(a.values).length).map((a) => ({ name: a.name.trim(), values: splitValues(a.values) })) } : {}),
   };
 
@@ -167,7 +168,8 @@ export default function NewProductPage() {
       )}
 
       <div className="space-y-3">
-        {features.has("lots") && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
+        {features.has("lots") && !serial && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
+        {features.has("serials") && !lot && <Toggle on={serial} onChange={setSerial}>{t("np_serial")}</Toggle>}
         <Toggle on={pos} onChange={setPos}>{t("np_pos")}</Toggle>
         {features.has("manufacturing") && <Toggle on={made} onChange={setMade}>{t("np_made")}</Toggle>}
       </div>

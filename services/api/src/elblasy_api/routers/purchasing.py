@@ -59,6 +59,7 @@ class ReceiveLineIn(BaseModel):
     line_id: int = Field(gt=0)
     qty: float = Field(gt=0, le=1e7)
     lot_name: str | None = Field(default=None, max_length=80)
+    serials: list[str] = Field(default_factory=list, max_length=1000)
     expiry: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$")
 
 

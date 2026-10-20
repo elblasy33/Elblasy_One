@@ -49,3 +49,9 @@ success claims, drift and manual steps.
 Catalogue import (products/barcodes/scale codes), expense/vendor-bill flows, background worker,
 the Next.js UI. Note: both CE test servers share one PostgreSQL, so each lists both `ce18`/`ce19`
 (open only the matching one).
+
+## Electronics and serial numbers
+The `electronics` vertical (phones and appliances) tracks each item by serial/IMEI by default, plus colours/capacities. The question
+`tracks_serials` appears for electronics and general trading; answering yes (or choosing electronics) adds the `serials` and `lots` features,
+and the plan enables Odoo's "Lots & serial numbers" setting through the normal reviewed step. Products are then created with tracking
+`serial`; receiving needs one serial per unit and the till needs one per unit sold.

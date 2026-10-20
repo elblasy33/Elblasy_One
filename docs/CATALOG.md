@@ -32,6 +32,12 @@ commit is replay-safe per `import_id`+row).
 ## Roles
 owner/manager: all. inventory_operator: manage+view. cashier/accountant: view (accountant also sees cost).
 
+## Editing, archiving, categories
+`PATCH /catalog/products/{template_id}` changes only the fields sent (name, price, cost, sku, barcode, category, in_pos, active); costs need
+the cost-visibility permission; barcodes are checked against every product (also archived ones). **Archiving is refused while the product still
+has stock**, so stock can never be hidden; `GET products?archived=true` lists archived products and `active:true` restores one.
+`GET /catalog/categories` feeds the category picker. Tracking can be none, lot (first-expiry-first-out at the till) or serial.
+
 ## Limits / TODO
-No product edit, archive, or per-variant barcodes yet; recipes cannot be edited and only support single-variant products;
-import is synchronous (100 rows); categories are matched by exact name; taxes use Odoo's company defaults (not set here).
+Recipes cannot be edited and only support single-variant products; no per-variant barcodes yet; units of measure are fixed to piece/kg
+(no management screen); import is synchronous (100 rows); categories are matched by exact name; taxes use Odoo's company defaults.

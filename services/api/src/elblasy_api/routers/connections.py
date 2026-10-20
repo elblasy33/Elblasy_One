@@ -1,6 +1,6 @@
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -34,6 +34,8 @@ class ConnectionIn(BaseModel):
     db_name: str = Field(min_length=1, max_length=120)
     login: str = Field(min_length=1, max_length=200)
     secret: str = Field(min_length=1, max_length=500, repr=False)  # Odoo API key
+    # new: a fresh Odoo to be set up from scratch; existing: an Odoo that already has data (review first)
+    mode: Literal["new", "existing"] = "new"
 
 
 class RotateIn(BaseModel):
@@ -46,6 +48,7 @@ class ConnectionOut(BaseModel):
     base_url: str
     db_name: str
     status: str
+    mode: str
     odoo_series: str | None
     odoo_edition: str | None
     compatibility_status: str
@@ -58,7 +61,7 @@ class ConnectionOut(BaseModel):
 def _out(c: OdooConnection) -> ConnectionOut:
     m = c.capability_manifest or {}
     return ConnectionOut(
-        id=str(c.id), name=c.name, base_url=c.base_url, db_name=c.db_name, status=c.status,
+        id=str(c.id), name=c.name, base_url=c.base_url, db_name=c.db_name, status=c.status, mode=c.mode,
         odoo_series=c.odoo_series, odoo_edition=c.odoo_edition,
         compatibility_status=c.compatibility_status, capabilities=m.get("capabilities"),
         allowed_companies=m.get("allowed_companies"),
@@ -122,7 +125,7 @@ def create_connection(
         raise api_error(422, "odoo_unavailable", str(exc)) from exc
     conn = OdooConnection(
         tenant_id=user.tenant_id, name=body.name, base_url=body.base_url.rstrip("/"),
-        db_name=body.db_name, login=body.login, secret_ciphertext=vault.encrypt(body.secret),
+        db_name=body.db_name, login=body.login, secret_ciphertext=vault.encrypt(body.secret), mode=body.mode,
     )  # fmt: skip
     _apply_manifest(conn, manifest)
     db.add(conn)

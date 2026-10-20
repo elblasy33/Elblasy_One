@@ -4,13 +4,15 @@ An expense is a posted vendor bill on an operating-expense account (the document
 separate payment (the cash movement). The platform never assumes an expense is paid. Expenses above
 a threshold entered by someone other than the owner/manager wait for approval."""
 
+import hashlib
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -291,6 +293,111 @@ def list_expenses(
     return _read(client, "expense_list", limit, offset, date_from or "", date_to or "")
 
 
+# ---- supporting documents (receipts, invoices) on an expense ----
+MAX_DOC_BYTES = 3 * 1024 * 1024
+
+
+def _sniff(raw: bytes) -> str | None:
+    """The file's real type from its first bytes; the client's declared type is never trusted."""
+    if raw.startswith(b"%PDF-"):
+        return "application/pdf"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+class DocumentIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=120)
+    data_base64: str = Field(min_length=4, max_length=int(MAX_DOC_BYTES * 1.4))
+
+
+@router.post("/expenses/{bill_id}/documents", status_code=201)
+def attach_document(
+    cid: uuid.UUID, bill_id: int, body: DocumentIn, idem: IDEM, request: Request,
+    user: User = Depends(require(P_EXPENSES)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    import base64
+    import binascii
+
+    c, client = _conn(db, user, cid, s, vault)
+    try:
+        raw = base64.b64decode(body.data_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise api_error(422, "document_rejected", "The file content is not valid") from exc
+    if not raw or len(raw) > MAX_DOC_BYTES:
+        raise api_error(422, "document_rejected", "The file must be between 1 byte and 3 MB")
+    mimetype = _sniff(raw)
+    if mimetype is None:
+        raise api_error(
+            422, "document_rejected", "Only PDF, PNG, JPEG or WebP files can be attached"
+        )
+    name = (
+        re.sub(r"[^\w.\- ]", "_", body.filename.replace("\\", "/").split("/")[-1])[:100]
+        or "document"
+    )
+    spec = {"bill_id": bill_id, "name": name, "mimetype": mimetype, "data": body.data_base64}
+
+    def verify(res: dict[str, Any], _before: Any) -> dict[str, Any]:
+        got = _read(client, "expense_attachments", bill_id)
+        att = res["refs"]["attachment"]
+        row = next((a for a in got.get("items", []) if a["id"] == att["id"]), None)
+        if row is None or row["size"] != len(raw):
+            raise api_error(
+                502, "verification_failed", "Odoo does not show the document as attached"
+            )
+        return {"attachment": row, "outcome": res["outcome"], "replayed": False}
+
+    return operations.run_write(
+        db, request, user=user, conn=c, client=client, op_type="money.expense.document", idem=idem,
+        payload={"bill_id": bill_id, "name": name, "sha256": hashlib.sha256(raw).hexdigest()},
+        method="expense_attach", spec=spec, verify=verify, what="document", audit_action="money.expense.document",
+        target_type="vendor_bill", target_id=lambda o: bill_id,
+        audit_after=lambda o: {"name": o["attachment"]["name"], "size": o["attachment"]["size"]},
+        rejected_code="document_rejected",
+    )  # fmt: skip
+
+
+@router.get("/expenses/{bill_id}/documents")
+def list_documents(
+    cid: uuid.UUID, bill_id: int, user: User = Depends(require_any(*SEE_MONEY)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings),
+    vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    _, client = _conn(db, user, cid, s, vault)
+    got = _read(client, "expense_attachments", bill_id)
+    if not got.get("found"):
+        raise api_error(404, "not_found", "Expense not found")
+    return {"items": got["items"]}
+
+
+@router.get("/documents/{att_id}")
+def download_document(
+    cid: uuid.UUID, att_id: int, user: User = Depends(require_any(*SEE_MONEY)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings),
+    vault: SecretVault = Depends(get_vault),
+) -> Response:  # fmt: skip
+    import base64
+
+    _, client = _conn(db, user, cid, s, vault)
+    got = _read(client, "expense_attachment_get", att_id)
+    if not got.get("found"):
+        raise api_error(404, "not_found", "Document not found")
+    raw = base64.b64decode(got["data"])
+    mimetype = (
+        _sniff(raw) or "application/octet-stream"
+    )  # served by its real type, always as a download
+    return Response(
+        content=raw, media_type=mimetype,
+        headers={"Content-Disposition": f'attachment; filename="{re.sub(r"[^A-Za-z0-9._-]", "_", got["name"]) or "document"}"',
+                 "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )  # fmt: skip
+
+
 @router.get("/expense-requests")
 def pending_expenses(
     cid: uuid.UUID, user: User = Depends(require_any(P_EXPENSES, P_EXPENSE_APPROVE)),
@@ -392,8 +499,12 @@ def pay_expense(
 
 # ---------------- money overview ----------------
 def _month() -> tuple[str, str]:
+    """First and last day of the current month; the end is not "today" so a shop whose local date is
+    ahead of UTC does not lose today's entries."""
     now = datetime.now(UTC)
-    return now.strftime("%Y-%m-01"), now.strftime("%Y-%m-%d")
+    first = now.replace(day=1)
+    last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d")
 
 
 @router.get("/overview")
@@ -421,11 +532,10 @@ def report(
 ) -> dict[str, Any]:  # fmt: skip
     """Income statement and cash movement for a period from posted accounting entries (default: this month)."""
     _, client = _conn(db, user, cid, s, vault)
-    d1 = _month()[0]
-    d2 = (datetime.fromisoformat(d1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    d1, d2s = _month()
     if date_from and date_to and date_from > date_to:
         raise api_error(422, "validation", "The start date is after the end date")
-    return _read(client, "money_report", date_from or d1, date_to or d2.strftime("%Y-%m-%d"))
+    return _read(client, "money_report", date_from or d1, date_to or d2s)
 
 
 @router.get("/ledger")

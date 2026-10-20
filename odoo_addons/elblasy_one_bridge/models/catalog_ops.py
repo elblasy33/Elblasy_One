@@ -95,9 +95,9 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         if kind not in ("unit", "weight"):
             raise UserError("kind must be 'unit' or 'weight'.")
         tracking = spec.get("tracking", "none")
-        if tracking not in ("none", "lot"):
-            raise UserError("tracking must be 'none' or 'lot'.")
-        if tracking == "lot" and not self.env.user.has_group("stock.group_production_lot"):
+        if tracking not in ("none", "lot", "serial"):
+            raise UserError("tracking must be 'none', 'lot' or 'serial'.")
+        if tracking != "none" and not self.env.user.has_group("stock.group_production_lot"):
             raise UserError("Lot/expiry tracking is not enabled on this Odoo.")
 
         vals = {"name": name, "list_price": price, "type": "consu", "sale_ok": True, "purchase_ok": True}

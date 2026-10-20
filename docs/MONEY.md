@@ -28,7 +28,14 @@ Nothing is ever written as a manual journal entry; everything goes through Odoo'
 money.overview / ledger: reports.view or payments.create (owner, manager, accountant). expenses: expenses.create (owner, manager,
 accountant). pay: payments.create. approve: expenses.approve (owner, manager). The cashier and the stock clerk see none of it (403).
 
+## Receivables (customers who owe you)
+See `CUSTOMERS.md`. The overview now shows total owed, overdue invoices and top debtors.
+
+## Financial report
+`GET /money/report?from=&to=` (reports.view): income, cost of goods, expenses, gross and net profit from *posted* accounting entries by
+account type, plus opening/in/out/closing per cash and bank journal. Register sales reach accounting when the shift is closed, so the page
+warns when registers are still open. Net profit is only as good as the chart of accounts the owner chose; the platform never estimates it.
+
 ## Not yet built
 Supporting documents/attachments on expenses (only a receipt-number reference), multi-currency expenses (company currency only), recurring
-expenses, customer receivables/credit sales (the receivables figure is not shown rather than guessed), bank-statement reconciliation,
-payments from the POS drawer that change the register's counted cash, per-tenant approval thresholds.
+expenses, bank-statement reconciliation, payments from the POS drawer that change the register's counted cash, per-tenant approval thresholds.

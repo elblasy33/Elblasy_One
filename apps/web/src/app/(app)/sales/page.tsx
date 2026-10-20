@@ -14,14 +14,14 @@ import { errorText, useLang } from "@/lib/i18n";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
 import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
-interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number }
+interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number; tracking?: string; serials?: string[] }
 type Tab = "register" | "history";
 
 function errMsg(t: ReturnType<typeof useLang>["t"], e: unknown): { text: string; ref?: string } | null {
   if (!(e instanceof ApiError)) return null;
   if (e.code === "network") return { text: t("err_network") };
   const base = errorText(t, e.code);
-  return { text: e.code === "sales_rejected" ? `${base} ${e.message}` : base, ...(e.correlationId ? { ref: e.correlationId } : {}) };
+  return { text: ["sales_rejected", "serial_not_in_stock", "lot_stock_short"].includes(e.code) ? `${base} ${e.message}` : base, ...(e.correlationId ? { ref: e.correlationId } : {}) };
 }
 
 export default function SalesPage() {
@@ -107,12 +107,12 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
     enabled: cart.length > 0, placeholderData: (p) => p, retry: false,
   });
 
-  const add = (p: { product_id: number; name: string; price: number; by_weight: boolean }, qty = 1) => {
+  const add = (p: { product_id: number; name: string; price: number; by_weight: boolean; tracking?: string }, qty = 1) => {
     setNotice(null);
     setCart((c) => {
       const i = c.findIndex((x) => x.product_id === p.product_id);
-      if (i >= 0) return c.map((x, j) => (j === i ? { ...x, qty: Math.round((x.qty + qty) * 1000) / 1000 } : x));
-      return [...c, { ...p, qty, discount: 0 }];
+      if (i >= 0) return c.map((x, j) => (j === i ? { ...x, qty: Math.round((x.qty + qty) * 1000) / 1000, ...(p.tracking === "serial" ? { serials: [...(x.serials ?? []), ""] } : {}) } : x));
+      return [...c, { ...p, qty, discount: 0, ...(p.tracking === "serial" ? { serials: [""] } : {}) }];
     });
   };
   const doScan = async (e: FormEvent) => {
@@ -120,13 +120,17 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
     const code = scan.trim();
     if (!code) return;
     if (/^[0-9A-Za-z-]{6,64}$/.test(code)) {
-      const r = await api<{ found: boolean; product_id?: number; name?: string; price?: number; qty?: number; by_weight?: boolean }>(
+      const r = await api<{ found: boolean; product_id?: number; name?: string; price?: number; qty?: number; by_weight?: boolean; tracking?: string }>(
         `/connections/${cid}/sales/lookup?config_id=${cfg.id}&code=${encodeURIComponent(code)}`).catch(() => null);
-      if (r?.found && r.product_id) { add({ product_id: r.product_id, name: r.name ?? "", price: r.price ?? 0, by_weight: !!r.by_weight }, r.qty ?? 1); setScan(""); return; }
+      if (r?.found && r.product_id) { add({ product_id: r.product_id, name: r.name ?? "", price: r.price ?? 0, by_weight: !!r.by_weight, ...(r.tracking ? { tracking: r.tracking } : {}) }, r.qty ?? 1); setScan(""); return; }
       if (/^\d{6,}$/.test(code)) { setNotice(t("pos_not_found")); return; }
     }
   };
-  const setQty = (id: number, qty: number) => setCart((c) => c.map((x) => (x.product_id === id ? { ...x, qty: Math.max(0.001, Math.round(qty * 1000) / 1000) } : x)));
+  const setQty = (id: number, qty: number) => setCart((c) => c.map((x) => {
+    if (x.product_id !== id) return x;
+    if (x.tracking === "serial") { const n = Math.max(1, Math.round(qty)); return { ...x, qty: n, serials: Array.from({ length: n }, (_, k) => x.serials?.[k] ?? "") }; }
+    return { ...x, qty: Math.max(0.001, Math.round(qty * 1000) / 1000) };
+  }));
   const remove = (id: number) => setCart((c) => c.filter((x) => x.product_id !== id));
   const newSale = () => { setResult(null); setCart([]); setCustomer(null); setScan(""); void qc.invalidateQueries({ queryKey: ["sales-orders", cid] }); void qc.invalidateQueries({ queryKey: ["sales-summary", cid] }); };
   const stale = quote.isPlaceholderData || quote.isFetching; // never show a total that no longer matches the cart
@@ -223,6 +227,16 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                           )}
                           <button aria-label="remove" onClick={() => remove(c.product_id)} className="grid size-10 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-4" aria-hidden /></button>
                         </div>
+                        {c.tracking === "serial" && (
+                          <div className="space-y-1">
+                            {(c.serials ?? []).map((sn, k) => (
+                              <input key={k} aria-label={`${t("pos_serial_n")} ${k + 1}`} placeholder={`${t("pos_serial")} ${k + 1}`} value={sn} dir="ltr" autoComplete="off"
+                                onChange={(e) => setCart(cart.map((x) => (x.product_id === c.product_id ? { ...x, serials: (x.serials ?? []).map((v, j) => (j === k ? e.target.value : v)) } : x)))}
+                                className="min-h-10 w-full rounded-xl border border-line bg-surface px-3 font-mono text-sm outline-none focus:border-brand" />
+                            ))}
+                          </div>
+                        )}
+                        {c.tracking === "lot" && <p className="text-xs text-soft">{t("pos_lot_auto")}</p>}
                       </li>
                     );
                   })}
@@ -236,7 +250,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                 </div>
               )}
             </Card>
-            <Button onClick={() => setPaying(true)} disabled={!quote.data || stale || cart.length === 0} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")}</Button>
+            <Button onClick={() => setPaying(true)} disabled={!quote.data || stale || cart.length === 0 || cart.some((c) => c.tracking === "serial" && (c.serials ?? []).some((v) => !v.trim()))} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")}</Button>
             {cart.length > 0 && <button onClick={() => setCart([])} className="w-full text-sm font-bold text-soft hover:text-bad">{t("pos_clear")}</button>}
           </aside>
         </div>
@@ -286,7 +300,7 @@ function PayDialog({ cid, cfg, cart, customer, canOverride, total, currency, dec
     ...(due > 0 ? [{ payment_method_id: method, amount: paid }] : []),
     ...(onCredit && creditMethod ? [{ payment_method_id: creditMethod.id, amount: credit }] : []),
   ];
-  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount })), expected_total: total, payments, ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
+  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
     mutationFn: () => api<SaleResult>(`/connections/${cid}/sales/orders`, { body: payload, headers: { "Idempotency-Key": keyFor(payload) } }),
     onSuccess: onDone,

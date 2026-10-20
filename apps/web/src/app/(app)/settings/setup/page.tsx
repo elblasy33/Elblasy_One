@@ -12,7 +12,7 @@ import type { Plan, Question, QuestionnaireOut } from "@/lib/types";
 
 type Answers = Record<string, unknown>;
 const EMOJI: Record<string, string> = {
-  grocery: "🛒", bookstore: "📚", shoes: "👟", clothing: "👕", general: "🏪",
+  grocery: "🛒", bookstore: "📚", shoes: "👟", clothing: "👕", electronics: "📱", general: "🏪",
   cash: "💵", card: "💳", wallet: "📱", bank_transfer: "🏦",
 };
 const label = (t: (k: TKey) => string, q: string, o: string) => t((q === "vertical" ? `v_${o}` : `p_${o}`) as TKey);

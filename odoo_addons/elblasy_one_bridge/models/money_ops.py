@@ -5,6 +5,7 @@ An expense is a vendor bill on an expense account (the *document*), optionally f
 until a payment is recorded. No journal entry is ever written directly. Taxes are not applied to
 platform expenses (the amount is the full amount payable); that is stated in the response."""
 
+import base64
 import re
 from datetime import date as _date
 
@@ -297,3 +298,58 @@ class ElblasyBridgeMoney(models.AbstractModel):
                 "cash_flow": "Posted movements on each cash/bank journal's own account (book basis; payments not yet reconciled to the bank are not counted)",
             },
         })  # fmt: skip
+
+    # ---------------- supporting documents on expenses ----------------
+    @api.model
+    def _attachment_view(self, a):
+        return {"id": a.id, "name": a.name, "mimetype": a.mimetype, "size": a.file_size, "created": str(a.create_date)[:19]}
+
+    @api.model
+    def expense_attach(self, op_id, key, spec):
+        """Attach a receipt/invoice image or PDF to an expense (vendor bill). Idempotent per key."""
+        self._require_internal_user()
+        self._need_accounting()
+        if not isinstance(key, str) or not KEY_RE.match(key):
+            raise UserError("Invalid operation key.")
+        existing = self._managed(f"att_{key}")
+        if existing:
+            return wire({"outcome": "already_exists", "refs": {"attachment": self._attachment_view(existing)}})
+        bill = self.env["account.move"].browse(int(spec.get("bill_id") or 0)).exists()
+        if not bill or bill.move_type != "in_invoice":
+            raise UserError("Expense not found.")
+        mimetype = spec.get("mimetype")
+        if mimetype not in ("application/pdf", "image/png", "image/jpeg", "image/webp"):
+            raise UserError("Only PDF, PNG, JPEG or WebP files can be attached.")
+        data = spec.get("data") or ""
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except Exception:  # noqa: BLE001
+            raise UserError("The file content is not valid.") from None
+        if not raw or len(raw) > 3 * 1024 * 1024:
+            raise UserError("The file must be between 1 byte and 3 MB.")
+        if self.env["ir.attachment"].search_count([("res_model", "=", "account.move"), ("res_id", "=", bill.id)]) >= 10:
+            raise UserError("An expense can hold at most 10 documents.")
+        name = (spec.get("name") or "document")[:100]
+        att = self.env["ir.attachment"].create({"name": name, "res_model": "account.move", "res_id": bill.id,
+                                                "mimetype": mimetype, "datas": data, "type": "binary"})  # fmt: skip
+        self._tag(f"att_{key}", att)
+        return wire({"outcome": "created", "refs": {"attachment": self._attachment_view(att)}})
+
+    @api.model
+    def expense_attachments(self, bill_id):
+        self._require_internal_user()
+        self._need_accounting()
+        bill = self.env["account.move"].browse(int(bill_id or 0)).exists()
+        if not bill or bill.move_type != "in_invoice":
+            return wire({"found": False})
+        atts = self.env["ir.attachment"].search([("res_model", "=", "account.move"), ("res_id", "=", bill.id)], order="id")
+        return wire({"found": True, "items": [self._attachment_view(a) for a in atts]})
+
+    @api.model
+    def expense_attachment_get(self, att_id):
+        self._require_internal_user()
+        self._need_accounting()
+        a = self.env["ir.attachment"].browse(int(att_id or 0)).exists()
+        if not a or a.res_model != "account.move" or self.env["account.move"].browse(a.res_id).move_type != "in_invoice":
+            return wire({"found": False})
+        return wire({"found": True, "name": a.name, "mimetype": a.mimetype, "data": a.datas.decode() if isinstance(a.datas, bytes) else a.datas})

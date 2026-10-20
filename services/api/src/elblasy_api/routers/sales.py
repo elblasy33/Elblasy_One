@@ -38,6 +38,7 @@ class SaleLine(BaseModel):
     product_id: int = Field(gt=0)
     qty: float = Field(gt=0, le=1_000_000)
     discount: float = Field(default=0, ge=0, le=100)
+    serials: list[str] = Field(default_factory=list, max_length=200)
 
 
 class QuoteIn(BaseModel):
@@ -128,9 +129,22 @@ def _write_error(db: Session, op: Operation, exc: Exception, what: str) -> Excep
             return api_error(
                 409, "credit_limit_exceeded", msg.removeprefix("CREDIT_LIMIT_EXCEEDED: ")
             )
+        for prefix, status, code in (("SERIALS_REQUIRED", 422, "serials_required"),
+                                     ("SERIAL_NOT_IN_STOCK", 422, "serial_not_in_stock"),
+                                     ("LOT_STOCK_SHORT", 409, "lot_stock_short")):  # fmt: skip
+            if msg.startswith(prefix):
+                return api_error(status, code, msg.removeprefix(prefix + ": "))
         return api_error(422, "sales_rejected", msg)
     operations.fail(db, op, "needs_review", str(exc))
     return api_error(502, "odoo_unavailable", str(exc))
+
+
+def _qty_by_product(lines: list[dict[str, Any]]) -> dict[int, float]:
+    """Quantity per product (a lot-tracked line may come back split into one line per lot)."""
+    out: dict[int, float] = {}
+    for ln in lines:
+        out[ln["product_id"]] = round(out.get(ln["product_id"], 0.0) + ln["qty"], 6)
+    return out
 
 
 def _check_discounts(user: User, lines: list[SaleLine]) -> None:
@@ -258,7 +272,7 @@ def checkout(
         order and order["state"] in PAID_STATES
         and abs(order["amount_total"] - body.expected_total) < MONEY_TOLERANCE
         and abs(order["amount_paid"] - order["amount_total"]) < MONEY_TOLERANCE
-        and len(order["lines"]) == len(body.lines)
+        and _qty_by_product(order["lines"]) == _qty_by_product([ln.model_dump() for ln in body.lines])
         and abs(sum(p["amount"] for p in order["payments"] if not p["is_change"]) - tendered) < MONEY_TOLERANCE
         and (  # a credit sale must show a posted invoice that is still open for exactly the credit amount
             not order.get("credit_amount")

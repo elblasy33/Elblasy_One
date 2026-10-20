@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Banknote, Plus, Receipt, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ExpenseDocs } from "@/components/expense-docs";
 import { MoneyTabs } from "@/components/money-tabs";
 import { Modal } from "@/components/modal";
 import { money } from "@/components/receipt";
@@ -94,6 +95,7 @@ export default function ExpensesPage() {
                 {r.amount_residual > 0.004 && <span className="text-xs text-soft">{t("mn_still_owed")}: <b dir="ltr">{money(r.amount_residual)}</b></span>}
                 {r.amount_residual > 0.004 && can("payments.create") && <Button variant="soft" className="min-h-10 px-3" onClick={() => setPay(r)}><Banknote className="size-4" aria-hidden /> {t("ex_pay")}</Button>}
               </div>
+              {cid && <ExpenseDocs cid={cid} billId={r.id} canAttach={can("expenses.create")} />}
             </Card></li>
           );
         })}

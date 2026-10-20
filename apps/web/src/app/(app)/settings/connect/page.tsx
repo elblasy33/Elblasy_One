@@ -18,12 +18,12 @@ export default function ConnectPage() {
   const [f, setF] = useState({ name: "", base_url: "", db_name: "", login: "", secret: "" });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const m = useMutation({
-    mutationFn: () => api<Connection>("/connections", { body: { ...f, name: f.name || "Odoo" } }),
+    mutationFn: () => api<Connection>("/connections", { body: { ...f, name: f.name || "Odoo", mode } }),
     onSuccess: (created) => {
       // Put the new connection in the cache first so the next screen never sees a stale empty list.
       qc.setQueryData<Connection[]>(["connections"], (old) => [...(old ?? []), created]);
       void qc.invalidateQueries({ queryKey: ["connections"] });
-      router.replace("/settings/setup");
+      router.replace(mode === "existing" ? "/settings/readiness" : "/settings/setup");
     },
   });
   const err = m.error instanceof ApiError ? m.error : null;

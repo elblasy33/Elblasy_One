@@ -77,6 +77,17 @@ TEMPLATES: dict[str, Template] = {
             default_features=frozenset({"variants"}),
         ),
         Template(
+            "electronics_starter",
+            "1.0.0",
+            "electronics",
+            {"ar": "إلكترونيات وموبايلات", "en": "Electronics / mobile phones"},
+            {
+                "ar": "رقم تسلسلي لكل قطعة (سيريال/IMEI)، ألوان وسعات، وضمان",
+                "en": "A serial/IMEI per item, colours and capacities",
+            },
+            default_features=frozenset({"serials", "lots", "variants"}),
+        ),
+        Template(
             "general_trading_starter",
             "1.0.0",
             "general",
@@ -93,6 +104,12 @@ def template_for(profile: BusinessProfile) -> Template:
 
 def resolve_features(t: Template, p: BusinessProfile) -> set[str]:
     f = set(t.default_features)
+    if p.tracks_serials is True:
+        f |= {"serials", "lots"}
+    if p.tracks_serials is False:
+        f -= {"serials"}
+        if not p.tracks_expiry:
+            f.discard("lots")
     if p.needs_variants is True:
         f.add("variants")
     if p.needs_variants is False:

@@ -169,3 +169,23 @@ def test_credit_sales_plan_creates_the_method_and_attaches_it_to_an_existing_pos
     )
     off = steps(build_plan(BusinessProfile(vertical="general"), MANIFEST, snap()))
     assert "pos_pm_credit" not in off  # a shop that does not sell on credit is never offered it
+
+
+def test_electronics_tracks_serials_by_default_and_the_answer_can_turn_it_off():
+    ids = {q.id for q in visible_questions({"vertical": "electronics"})}
+    assert "tracks_serials" in ids and "tracks_serials" not in {
+        q.id for q in visible_questions({"vertical": "shoes"})
+    }
+    on = build_plan(build_profile({"vertical": "electronics"}), MANIFEST, snap())
+    assert {"serials", "lots", "variants"} <= set(on["features"])
+    assert (
+        steps(on)["feature_lots"]["status"] == "to_apply"
+    )  # serial tracking needs Odoo's lots & serial numbers
+    off = build_plan(
+        build_profile({"vertical": "electronics", "tracks_serials": False}), MANIFEST, snap()
+    )
+    assert "serials" not in off["features"] and "lots" not in off["features"]
+    asked = build_plan(
+        build_profile({"vertical": "general", "tracks_serials": True}), MANIFEST, snap()
+    )
+    assert "serials" in asked["features"]

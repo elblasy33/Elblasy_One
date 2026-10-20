@@ -5,6 +5,7 @@ export type Bilingual = Record<Lang, string>;
 export interface Me { id: string; email: string; role: string; tenant_id: string; permissions: string[]; display_name?: string; active?: boolean; must_change_password?: boolean; last_login_at?: string }
 
 export interface Connection {
+  mode?: "new" | "existing";
   id: string; name: string; base_url: string; db_name: string; status: string;
   odoo_series: string | null; odoo_edition: string | null; compatibility_status: string;
   capabilities: Record<string, boolean> | null; last_health_ok_at: string | null;
@@ -69,7 +70,7 @@ export interface PosConfig {
   id: number; name: string; session?: SessionView; payment_methods: { id: number; name: string; is_cash: boolean; is_credit?: boolean }[];
 }
 export interface SalesState { configs: PosConfig[]; currency: string; currency_decimals: number; stock_updates?: string; company?: string }
-export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean }
+export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean; tracking?: string }
 export interface QuoteLine { product_id: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
 export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string }
 export interface OrderLine { id?: number; refunded_qty?: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }

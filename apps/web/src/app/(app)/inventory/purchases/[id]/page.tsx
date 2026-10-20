@@ -129,12 +129,15 @@ function ReceiveDialog({ cid, order, onClose, onDone }: { cid: string; order: Pu
   const open = order.lines.filter((l) => l.ordered - l.received > 0.0001);
   const [qty, setQty] = useState<Record<number, string>>(Object.fromEntries(open.map((l) => [l.id, String(l.ordered - l.received)])));
   const [lot, setLot] = useState<Record<number, string>>({});
-  const lines = open.filter((l) => Number(qty[l.id]) > 0).map((l) => ({ line_id: l.id, qty: Number(qty[l.id]), ...(lot[l.id]?.trim() ? { lot_name: lot[l.id]!.trim() } : {}) }));
+  const [sn, setSn] = useState<Record<number, string>>({});
+  const serialsOf = (id: number) => (sn[id] ?? "").split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
+  const isSerial = (l: PoLine) => l.tracking === "serial";
+  const lines = open.filter((l) => (isSerial(l) ? serialsOf(l.id).length > 0 : Number(qty[l.id]) > 0)).map((l) => (isSerial(l) ? { line_id: l.id, qty: serialsOf(l.id).length, serials: serialsOf(l.id) } : { line_id: l.id, qty: Number(qty[l.id]), ...(lot[l.id]?.trim() ? { lot_name: lot[l.id]!.trim() } : {}) }));
   const payload = { lines };
   const m = useMutation({ mutationFn: () => api(`/connections/${cid}/purchasing/orders/${order.id}/receive`, { body: payload, headers: { "Idempotency-Key": keyFor({ order: order.id, ...payload }) } }), onSuccess: onDone });
   const e = msg(t, m.error);
-  const needsLot = (l: PoLine) => l.tracking !== "none";
-  const ok = lines.length > 0 && open.every((l) => !(Number(qty[l.id]) > 0) || !needsLot(l) || !!lot[l.id]?.trim());
+  const needsLot = (l: PoLine) => l.tracking === "lot";
+  const ok = lines.length > 0 && open.every((l) => isSerial(l) || !(Number(qty[l.id]) > 0) || !needsLot(l) || !!lot[l.id]?.trim());
   return (
     <Modal title={t("po_receive_title")} onClose={onClose}>
       <div className="space-y-4">
@@ -142,10 +145,13 @@ function ReceiveDialog({ cid, order, onClose, onDone }: { cid: string; order: Pu
         {open.map((l) => (
           <div key={l.id} className="space-y-2 rounded-2xl bg-surface2 p-3">
             <div className="flex items-center justify-between gap-2"><span className="font-bold" dir="auto">{l.name}</span><span className="text-xs text-soft">{t("po_remaining")}: <b dir="ltr">{l.ordered - l.received}</b></span></div>
-            <div className="flex gap-2">
+            {isSerial(l) ? (
+              <label className="block text-sm font-bold">{t("po_serials")} <span className="text-xs font-normal text-soft">({t("po_serials_count")}: {serialsOf(l.id).length})</span>
+                <textarea rows={4} value={sn[l.id] ?? ""} onChange={(ev) => setSn({ ...sn, [l.id]: ev.target.value })} dir="ltr" className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 font-mono text-sm" /></label>
+            ) : <div className="flex gap-2">
               <input aria-label={t("po_qty")} type="number" inputMode="decimal" min="0" max={l.ordered - l.received} step="any" value={qty[l.id] ?? ""} onChange={(ev) => setQty({ ...qty, [l.id]: ev.target.value })} dir="ltr" className="min-h-12 w-28 rounded-xl border border-line bg-surface px-3 text-center text-lg font-bold" />
               {needsLot(l) && <input aria-label={t("po_lot")} placeholder={t("po_lot")} value={lot[l.id] ?? ""} onChange={(ev) => setLot({ ...lot, [l.id]: ev.target.value })} dir="ltr" className="min-h-12 flex-1 rounded-xl border border-line bg-surface px-3" />}
-            </div>
+            </div>}
           </div>
         ))}
         {e && <ErrorBox message={e.text} reference={e.ref} />}

@@ -78,6 +78,16 @@ test("audit log, operations, readiness details and alerts are visible to the own
   await expect(page.getByRole("heading", { name: "تنبيهات تحتاج انتباهك" })).toBeVisible();
   await expect(page.getByText("مبيعات آخر ٧ أيام")).toBeVisible();
   await expect(page.getByText("الأكثر مبيعًا")).toBeVisible();
+  // purchases has its own place in the menu; the menu folds to icons to give the page more room
+  const nav = page.getByRole("navigation", { name: "القائمة الرئيسية" }).first();
+  await expect(nav.getByRole("link", { name: "المشتريات" })).toBeVisible();
+  const before = (await page.locator("aside").boundingBox())!.width;
+  await page.getByRole("button", { name: "طيّ القائمة" }).click();
+  await expect.poll(async () => (await page.locator("aside").boundingBox())!.width).toBeLessThan(before - 80);
+  await expect(page.getByRole("link", { name: "المشتريات" }).first()).toBeVisible(); // still reachable by icon
+  await page.reload();
+  await expect(page.getByRole("button", { name: "فتح القائمة" })).toBeVisible(); // remembered
+  await page.getByRole("button", { name: "فتح القائمة" }).click();
   await page.screenshot({ path: "e2e/shots/63-today-alerts.png", fullPage: true });
 });
 

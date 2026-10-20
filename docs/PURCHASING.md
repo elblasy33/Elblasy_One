@@ -25,7 +25,12 @@ followed by a retry leaves stock at 6, not 12. The operation stores the pre-stat
 it. Roles: the stock clerk orders and receives but sees no prices/balances and cannot bill or pay; the accountant bills, pays and
 reads balances but cannot buy or receive; the cashier has no access. Costs and balances are removed server-side.
 
+## Returning goods to the supplier
+`POST /purchasing/orders/{id}/return` with `lines:[{line_id, qty}]` sends received goods back through a real Odoo return transfer (stock leaves,
+verified by a fresh read of received quantity and stock). If the order was already billed, a *posted vendor credit note* for the returned
+value is created and lowers what is owed (the clerk may return unbilled orders; billed orders need the accounting permission). Returning
+more than was received is refused. Serial-tracked goods are received with one distinct serial per unit (`serials`), duplicates refused.
+
 ## Not yet built
-Purchase returns / supplier credit notes, editing or cancelling orders, supplier price lists, receiving into several locations,
-expiry dates (the lot number is stored; the expiry date is written only when the product-expiry app is installed), supplier
-payments from the register's cash drawer (the payment uses the cash *journal*; it does not alter a POS session's counted cash).
+Editing or cancelling orders, supplier price lists, receiving into several locations, partial credit notes with a different price than the
+order, supplier payments from the register's cash drawer (the payment uses the cash *journal*; it does not alter a POS session's counted cash).

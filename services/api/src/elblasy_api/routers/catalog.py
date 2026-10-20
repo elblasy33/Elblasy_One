@@ -41,7 +41,7 @@ class ProductIn(BaseModel):
     auto_barcode: Literal["none", "internal", "scale"] = "none"
     category: str | None = Field(default=None, max_length=100)
     sku: str | None = Field(default=None, max_length=64)
-    tracking: Literal["none", "lot"] = "none"
+    tracking: Literal["none", "lot", "serial"] = "none"
     pos: bool = True
     variants: list[VariantAttr] | None = Field(default=None, max_length=3)
 

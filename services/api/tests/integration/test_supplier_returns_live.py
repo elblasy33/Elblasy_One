@@ -74,3 +74,20 @@ def test_return_before_and_after_billing_with_credit_note(shop):  # noqa: F811
     )
     assert len(notes) == 1 and notes[0]["state"] == "posted"
     assert owed() < before  # the credit note reduced what is owed
+
+
+def test_zero_value_order_is_not_billed_and_says_why(shop):  # noqa: F811
+    client, cid, url, db, cfg, cash = shop
+    pid, _ = product(client, cid, url, db, name="عينة", price=10, stock=0)
+    po = order(client, cid, supplier(client, cid), pid, qty=5, price=0)
+    rec = client.post(
+        P(cid, f"/orders/{po['id']}/receive"),
+        json={"lines": [{"line_id": po["lines"][0]["id"], "qty": 5}]},
+        headers=idem(),
+    )
+    assert rec.status_code == 201, rec.text
+    bill = client.post(P(cid, f"/orders/{po['id']}/bill"), headers=idem())
+    assert bill.status_code == 422 and "value is zero" in bill.json()["error"]["message"], bill.text
+    assert (
+        rpc(url, db)("account.move", "search_count", [["move_type", "=", "in_invoice"]]) == 0
+    )  # no stray bill

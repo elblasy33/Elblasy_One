@@ -175,3 +175,17 @@ def test_any_signed_in_user_gets_a_minimal_current_connection(client, target):
     make_owner(other, f"{_u.uuid4().hex[:8]}@example.com", business="Other")
     assert other.get("/connections/current").status_code == 404  # another shop never sees it
     assert TestClient(create_app()).get("/connections/current").status_code == 401
+
+
+def test_onboarding_mode_is_remembered_and_validated(client, target):
+    series, url, db = target
+    new = client.post("/connections", json=body(url, db, name="A"))
+    assert new.status_code == 201 and new.json()["mode"] == "new"  # the default
+    existing = client.post("/connections", json={**body(url, db, name="B"), "mode": "existing"})
+    assert existing.status_code == 201 and existing.json()["mode"] == "existing"
+    assert (
+        client.post("/connections", json={**body(url, db, name="C"), "mode": "weird"}).status_code
+        == 422
+    )
+    listed = {c["name"]: c["mode"] for c in client.get("/connections").json()}
+    assert listed == {"A": "new", "B": "existing"}
