@@ -76,6 +76,7 @@ WRITE_METHODS = frozenset(
         "suppliers_upsert",
         "purchase_create_order",
         "purchase_receive",
+        "purchase_set_price",
         "purchase_return",
         "purchase_create_bill",
         "purchase_pay_bill",

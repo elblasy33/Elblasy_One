@@ -1,6 +1,6 @@
 "use client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Banknote, FileText, PackageCheck, Undo2, XCircle } from "lucide-react";
+import { Banknote, FileText, PackageCheck, Pencil, Undo2, XCircle } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
@@ -41,6 +41,7 @@ export default function PurchaseDetail() {
   const data = usePurchaseOrder(cid, id);
   const [dlg, setDlg] = useState<"receive" | "pay" | "return" | null>(null);
   const [payBill, setPayBill] = useState<BillBrief | null>(null);
+  const [priceLine, setPriceLine] = useState<PoLine | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const can = (p: string) => !!me.data?.permissions.includes(p);
   const refresh = () => { setDlg(null); void qc.invalidateQueries({ queryKey: ["purchase-order"] }); void qc.invalidateQueries({ queryKey: ["purchase-orders"] }); void qc.invalidateQueries({ queryKey: ["suppliers"] }); };
@@ -81,6 +82,12 @@ export default function PurchaseDetail() {
                   <span className="col-span-2 font-bold sm:col-span-1" dir="auto">{l.name}</span>
                   <Num label={t("po_ordered")} v={l.ordered} /><Num label={t("po_received")} v={l.received} tone={l.received >= l.ordered ? "ok" : undefined} /><Num label={t("po_billed")} v={l.billed} /><Num label={t("po_remaining")} v={Math.max(0, l.ordered - l.received)} />
                 </div>
+                {l.price_unit !== undefined && (
+                  <p className="flex flex-wrap items-center gap-2 text-sm"><span className="text-soft">{t("po_price")}:</span> <b dir="ltr" className={l.price_unit > 0 ? "" : "text-bad"}>{money(l.price_unit)}</b>
+                    <span className="text-soft">{t("po_line_total")}:</span> <b dir="ltr">{money(l.subtotal ?? 0)}</b>
+                    {l.billed === 0 && can("purchasing.manage") && <button type="button" onClick={() => setPriceLine(l)} className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-line px-2 text-xs font-bold hover:bg-surface2"><Pencil className="size-3" aria-hidden />{t("po_edit_price")}</button>}
+                    {l.price_unit <= 0 && <span className="font-bold text-bad">{t("po_zero_price")}</span>}</p>
+                )}
                 {s && <p className="text-xs text-soft">{t("po_stock")}: {t("po_on_hand")} <b dir="ltr">{s.on_hand}</b> · {t("po_free")} <b dir="ltr">{s.free}</b> · {t("po_incoming")} <b dir="ltr">{s.incoming}</b> · {t("po_forecast")} <b dir="ltr">{s.forecast}</b></p>}
               </li>
             );
@@ -113,6 +120,7 @@ export default function PurchaseDetail() {
       )}
 
       {dlg === "receive" && cid && <ReceiveDialog cid={cid} order={o} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_received_ok")); refresh(); }} />}
+      {priceLine && cid && <PriceDialog cid={cid} orderId={o.id} line={priceLine} onClose={() => setPriceLine(null)} onDone={() => { setPriceLine(null); refresh(); }} />}
       {dlg === "return" && cid && <ReturnDialog cid={cid} order={o} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_return_ok")); refresh(); }} />}
       {dlg === "pay" && cid && payBill && <PayDialog cid={cid} bill={payBill} onClose={() => setDlg(null)} onDone={() => { setFlash(t("po_pay_ok")); refresh(); }} />}
     </div>
@@ -156,6 +164,26 @@ function ReceiveDialog({ cid, order, onClose, onDone }: { cid: string; order: Pu
         ))}
         {e && <ErrorBox message={e.text} reference={e.ref} />}
         <Button onClick={() => m.mutate()} disabled={!ok} loading={m.isPending} className="min-h-14 w-full">{t("po_confirm_receive")}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function PriceDialog({ cid, orderId, line, onClose, onDone }: { cid: string; orderId: number; line: PoLine; onClose: () => void; onDone: () => void }) {
+  const { t } = useLang();
+  const keyFor = useIdempotencyKey();
+  const [price, setPrice] = useState(line.price_unit ? String(line.price_unit) : "");
+  const body = { price_unit: Number(price || 0) };
+  const m = useMutation({ mutationFn: () => api(`/connections/${cid}/purchasing/orders/${orderId}/lines/${line.id}`, { method: "PATCH", body, headers: { "Idempotency-Key": keyFor({ orderId, line: line.id, ...body }) } }), onSuccess: onDone });
+  const e = msg(t, m.error);
+  return (
+    <Modal title={t("po_edit_price")} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="font-bold" dir="auto">{line.name}</p>
+        <label className="block text-sm font-bold">{t("po_price")}
+          <input autoFocus type="number" inputMode="decimal" min="0" step="any" value={price} onChange={(ev) => setPrice(ev.target.value)} dir="ltr" className="mt-1.5 min-h-14 w-full rounded-2xl border border-line bg-surface px-4 text-center text-3xl font-black outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" /></label>
+        {e && <ErrorBox message={e.text} reference={e.ref} />}
+        <Button onClick={() => m.mutate()} disabled={!(Number(price) > 0)} loading={m.isPending} className="min-h-14 w-full">{t("pe_save")}</Button>
       </div>
     </Modal>
   );

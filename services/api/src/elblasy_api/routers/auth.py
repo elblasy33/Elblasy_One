@@ -21,7 +21,7 @@ router = APIRouter(tags=["auth"])
 
 
 class Credentials(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=200)
 
 
@@ -149,7 +149,12 @@ def login(
     db: Session = Depends(get_session),
     s: Settings = Depends(get_settings),
 ) -> UserOut:
-    email = body.email.lower()
+    email = body.email.strip().lower()
+    if "@" not in email:
+        # Local development only: "admin" means admin@local.test. Production always needs a real e-mail.
+        if s.is_production:
+            raise api_error(401, "invalid_credentials", "Invalid e-mail or password")
+        email = f"{email}@local.test"
     ip = request.client.host if request.client else "?"
     if not login_limiter.allow(f"{ip}|{email}"):
         raise api_error(429, "rate_limited", "Too many attempts, try again later")

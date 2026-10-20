@@ -285,6 +285,47 @@ def receive(
     return out
 
 
+class PriceIn(BaseModel):
+    price_unit: float = Field(ge=0, le=1e9)
+
+
+@router.patch("/orders/{order_id}/lines/{line_id}")
+def set_line_price(
+    cid: uuid.UUID, order_id: int, line_id: int, body: PriceIn, idem: IDEM, request: Request,
+    user: User = Depends(require(P_PURCHASING)), db: Session = Depends(get_session),
+    s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    """Correct the unit price of a not-yet-billed line (e.g. an order created with a zero price)."""
+    c, client = _conn(db, user, cid, s, vault)
+    if not (has_permission(user.role, P_COST_VISIBLE) or has_permission(user.role, P_PAYMENTS)):
+        raise api_error(403, "forbidden", "You may not change prices")
+
+    def before() -> dict[str, Any]:
+        got = _read(client, "purchase_get", order_id)
+        if not got.get("found"):
+            raise api_error(404, "not_found", "Order not found")
+        order: dict[str, Any] = got["order"]
+        return order
+
+    def verify(res: dict[str, Any], prior: dict[str, Any]) -> dict[str, Any]:
+        got = client.call_bridge("purchase_get", order_id)
+        after = got["order"] if got.get("found") else None
+        line = next((ln for ln in (after or {}).get("lines", []) if ln["id"] == line_id), None)
+        if line is None or abs(line["price_unit"] - body.price_unit) > TOL:
+            raise _verification_failed("price")
+        return {"order": after}
+
+    out = operations.run_write(
+        db, request, user=user, conn=c, client=client, op_type="purchasing.line.price", idem=idem,
+        payload={"order_id": order_id, "line_id": line_id, **body.model_dump()}, method="purchase_set_price",
+        spec={"order_id": order_id, "line_id": line_id, **body.model_dump()}, verify=verify, before=before,
+        what="price", audit_action="purchasing.line.price", target_type="purchase_order",
+        target_id=lambda o: o["order"]["id"], audit_after=lambda o: {"line": line_id, "price": body.price_unit},
+        rejected_code="order_rejected",
+    )  # fmt: skip
+    return out
+
+
 @router.post("/orders/{order_id}/return", status_code=201)
 def return_goods(
     cid: uuid.UUID, order_id: int, body: ReturnIn, idem: IDEM, request: Request,

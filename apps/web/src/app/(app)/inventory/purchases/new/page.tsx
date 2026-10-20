@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { InventoryTabs } from "@/components/inv-tabs";
+import { money } from "@/components/receipt";
 import { Button, Card, ErrorBox, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useHydrated } from "@/lib/hydrated";
@@ -59,7 +60,9 @@ function NewPurchase({ prefill }: { prefill: boolean }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["purchase-orders"] }),
   });
   const err = m.error instanceof ApiError ? m.error : null;
-  const valid = !!partner && lines.length > 0 && lines.every((l) => Number(l.qty) > 0);
+  const anyBad = lines.some((l) => !(Number(l.price) > 0));
+  const total = lines.reduce((sum, l) => sum + Number(l.qty || 0) * Number(l.price || 0), 0);
+  const valid = !!partner && lines.length > 0 && lines.every((l) => Number(l.qty) > 0) && (!canPrice || !anyBad);
 
   if (m.data)
     return (
@@ -96,14 +99,25 @@ function NewPurchase({ prefill }: { prefill: boolean }) {
       </Card>
       {lines.length > 0 && (
         <Card className="space-y-3">
-          {lines.map((l, i) => (
-            <div key={l.product_id} className="flex flex-wrap items-center gap-2">
-              <span className="min-w-0 flex-1 basis-40 truncate font-bold" dir="auto">{l.name}</span>
-              <input aria-label={t("po_qty")} type="number" inputMode="decimal" min="0" step="any" value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} dir="ltr" className="min-h-11 w-24 rounded-xl border border-line bg-surface px-2 text-center" />
-              {canPrice && <input aria-label={t("po_price")} type="number" inputMode="decimal" min="0" step="any" value={l.price} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} dir="ltr" className="min-h-11 w-28 rounded-xl border border-line bg-surface px-2 text-center" />}
-              <button type="button" aria-label="remove" onClick={() => setLines(lines.filter((_, j) => j !== i))} className="grid size-11 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-5" aria-hidden /></button>
-            </div>
-          ))}
+          <div className="hidden grid-cols-[1fr_6rem_7rem_6rem_2.75rem] gap-2 px-1 text-xs font-bold text-soft sm:grid">
+            <span>{t("po_title")}</span><span className="text-center">{t("po_qty")}</span>{canPrice && <span className="text-center">{t("po_price")}</span>}<span className="text-center">{t("po_line_total")}</span><span />
+          </div>
+          {lines.map((l, i) => {
+            const bad = canPrice && !(Number(l.price) > 0);
+            return (
+              <div key={l.product_id} className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[1fr_6rem_7rem_6rem_2.75rem]">
+                <span className="col-span-2 min-w-0 truncate font-bold sm:col-span-1" dir="auto">{l.name}</span>
+                <label className="text-[10px] text-soft sm:text-[0px]"><span className="sm:hidden">{t("po_qty")}</span>
+                  <input aria-label={t("po_qty")} type="number" inputMode="decimal" min="0" step="any" value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} dir="ltr" className="min-h-11 w-full rounded-xl border border-line bg-surface px-2 text-center text-base text-ink" /></label>
+                {canPrice && <label className="text-[10px] text-soft sm:text-[0px]"><span className="sm:hidden">{t("po_price")}</span>
+                  <input aria-label={t("po_price")} aria-invalid={bad} type="number" inputMode="decimal" min="0" step="any" placeholder="0.00" value={l.price} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} dir="ltr" className={`min-h-11 w-full rounded-xl border bg-surface px-2 text-center text-base text-ink ${bad ? "border-bad" : "border-line"}`} /></label>}
+                <span className="text-center font-black" dir="ltr">{canPrice ? money(Number(l.qty || 0) * Number(l.price || 0)) : "—"}</span>
+                <button type="button" aria-label="remove" onClick={() => setLines(lines.filter((_, j) => j !== i))} className="grid size-11 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-5" aria-hidden /></button>
+              </div>
+            );
+          })}
+          {canPrice && <p className="flex items-baseline justify-between border-t border-line pt-3 text-xl font-black"><span>{t("po_order_total")}</span><span dir="ltr">{money(total)}</span></p>}
+          {canPrice && anyBad && <p role="alert" className="text-sm font-bold text-bad">{t("po_price_required")}</p>}
         </Card>
       )}
       {err && <ErrorBox message={err.code === "network" ? t("err_network") : `${errorText(t, err.code)} ${err.code === "order_rejected" ? err.message : ""}`} reference={err.correlationId} />}

@@ -260,6 +260,24 @@ class ElblasyBridgePurchase(models.AbstractModel):
         return wire({"found": True, "order": self._po_view(po)} if po else {"found": False})
 
     @api.model
+    def purchase_set_price(self, op_id, key, spec):
+        """Correct the unit price of an order line that has not been billed yet (a price set to the supplier's
+        real one). Billed lines keep their price: those need a credit note."""
+        self._require_internal_user()
+        self._need_purchase()
+        self._key(key)
+        po = self.env["purchase.order"].browse(int(spec.get("order_id") or 0)).exists()
+        line = po.order_line.filtered(lambda l: l.id == int(spec.get("line_id") or 0)) if po else None
+        if not line:
+            raise UserError("Order line not found.")
+        if po.state not in ("purchase", "done"):
+            raise UserError("Only a confirmed order can be repriced.")
+        if line.qty_invoiced:
+            raise UserError("This line is already billed; correct it with a credit note instead.")
+        line.write({"price_unit": _num(spec.get("price_unit"), "price", maximum=1e9)})
+        return wire({"outcome": "updated", "refs": {"order": self._po_view(self.env["purchase.order"].browse(po.id))}})
+
+    @api.model
     def purchase_list(self, limit, offset):
         self._require_internal_user()
         self._need_purchase()
