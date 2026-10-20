@@ -15,6 +15,7 @@ from elblasy_api.routers import (
     purchasing,
     sales,
     setup,
+    sorders,
     stock,
 )
 from elblasy_api.security.middleware import install
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(setup.router)
     app.include_router(catalog.router)
     app.include_router(sales.router)
+    app.include_router(sorders.router)
     app.include_router(purchasing.router)
     app.include_router(stock.router)
     app.include_router(money.router)

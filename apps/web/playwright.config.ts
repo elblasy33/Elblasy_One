@@ -21,12 +21,13 @@ export default defineConfig({
   reporter: [["list"]],
   use: { baseURL: "http://localhost:3100", locale: "ar-EG", trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /(responsive|catalog|sales|purchasing|stock|money|admin)\.spec\.ts/ },
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: /(responsive|catalog|sales|sorders|purchasing|stock|money|admin)\.spec\.ts/ },
     // runs after onboarding, which installs manufacturing and creates the POS in the shared Odoo copy
+    { name: "sorders", use: { ...devices["Desktop Chrome"] }, testMatch: /sorders\.spec\.ts/, dependencies: ["sales"] },
     { name: "admin", use: { ...devices["Desktop Chrome"] }, testMatch: /admin\.spec\.ts/, dependencies: ["money"] },
     { name: "money", use: { ...devices["Desktop Chrome"] }, testMatch: /money\.spec\.ts/, dependencies: ["stock"] },
     { name: "stock", use: { ...devices["Desktop Chrome"] }, testMatch: /stock\.spec\.ts/, dependencies: ["purchasing"] },
-    { name: "purchasing", use: { ...devices["Desktop Chrome"] }, testMatch: /purchasing\.spec\.ts/, dependencies: ["sales"] },
+    { name: "purchasing", use: { ...devices["Desktop Chrome"] }, testMatch: /purchasing\.spec\.ts/, dependencies: ["sorders"] },
     { name: "sales", use: { ...devices["Desktop Chrome"] }, testMatch: /sales\.spec\.ts/, dependencies: ["catalog"] },
     { name: "catalog", use: { ...devices["Desktop Chrome"] }, testMatch: /catalog\.spec\.ts/, dependencies: ["desktop"] },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /responsive\.spec\.ts/ },

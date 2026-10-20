@@ -1,5 +1,5 @@
 "use client";
-import { Boxes, ChevronsLeft, ChevronsRight, ClipboardList, LayoutDashboard, Languages, Lock, LogOut, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
+import { Boxes, ChevronsLeft, ChevronsRight, ClipboardList, FileText, LayoutDashboard, Languages, Lock, LogOut, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ interface Item { href: string; label: TKey; icon: typeof Store; any: string[]; c
 const ITEMS: Item[] = [
   { href: "/today", label: "nav_today", icon: LayoutDashboard, any: [] },
   { href: "/sales", label: "nav_sales", icon: ShoppingCart, any: ["sales.create"], cap: "pos" },
+  { href: "/sales-orders", label: "nav_sorders", icon: FileText, any: ["sales.orders"], cap: "sales" },
   { href: "/inventory", label: "nav_inventory", icon: Boxes, any: ["inventory.adjust", "products.manage", "reports.view"], cap: "inventory", not: ["/inventory/purchases", "/inventory/suppliers"] },
   { href: "/inventory/purchases", label: "nav_purchases", icon: ClipboardList, any: ["purchasing.view"], cap: "purchase", match: ["/inventory/purchases", "/inventory/suppliers"] },
   { href: "/money", label: "nav_money", icon: Wallet, any: ["payments.create", "expenses.create", "reports.view"], cap: "accounting" },

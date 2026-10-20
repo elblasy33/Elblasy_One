@@ -33,6 +33,7 @@ P_PURCHASING_VIEW = "purchasing.view"
 P_STOCK_APPROVE = "inventory.approve"
 P_EXPENSE_APPROVE = "expenses.approve"
 P_CUSTOMERS = "customers.manage"
+P_SALES_ORDERS = "sales.orders"  # manual (wholesale / on-credit) sales orders
 
 ALL = {
     P_SALES, P_DISCOUNT, P_RETURNS, P_PAYMENTS, P_EXPENSES, P_STOCK_ADJUST, P_COST_VISIBLE,
@@ -40,6 +41,7 @@ ALL = {
     P_PRODUCTS, P_PRODUCTS_VIEW, P_PURCHASING, P_PURCHASING_VIEW, P_STOCK_APPROVE,
     P_EXPENSE_APPROVE,
     P_CUSTOMERS,
+    P_SALES_ORDERS,
 }  # fmt: skip
 
 PERMISSIONS: dict[Role, frozenset[str]] = {

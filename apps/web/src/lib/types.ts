@@ -148,3 +148,11 @@ export interface MoneyReport {
 }
 
 export interface RefundRequest { id: string; status: string; requested_by: string; created_at: string; order?: string; amount?: number; order_id?: number; partial: boolean; note?: string | null }
+
+export interface SalesOrderLine { id: number; product_id: number; name: string; qty: number; delivered: number; invoiced: number; price_unit: number; discount: number; subtotal: number; total: number }
+export interface SalesOrder {
+  id: number; name: string; state: string; partner_id: number; partner: string; date: string;
+  amount_untaxed: number; amount_tax: number; amount_total: number; invoice_status: string;
+  delivery_status: "none" | "waiting" | "done"; lines: SalesOrderLine[];
+  invoices: { id: number; name?: string; state: string; payment_state: string; amount_total: number; amount_residual: number; date?: string; due?: string }[];
+}
