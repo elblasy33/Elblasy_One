@@ -133,8 +133,8 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const products = (list.data?.pages ?? []).flatMap((p) => p.items);
   const lines = cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}) }));
   const quote = useQuery({
-    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines)],
-    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines } }),
+    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines), customer?.id ?? 0],
+    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines, ...(customer ? { partner_id: customer.id } : {}) } }),
     enabled: cart.length > 0, placeholderData: (p) => p, retry: false,
   });
 
@@ -376,7 +376,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
             </div>
             {cfg.payment_methods.some((m) => m.is_credit) && (
               <button onClick={() => setPickingCustomer(true)} className="flex min-h-12 w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 font-bold hover:bg-surface2">
-                <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}</span>
+                <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-end text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}{customer?.pricelist && <span className="block text-xs font-bold text-brand">{customer.pricelist}</span>}</span>
               </button>
             )}
             <Card className="space-y-3 p-4">

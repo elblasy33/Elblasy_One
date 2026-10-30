@@ -32,8 +32,8 @@ export default function NewSalesOrderPage() {
   const [days, setDays] = useState("30");
   const [override, setOverride] = useState(false);
   const found = useQuery({ queryKey: ["so-products", cid, text.trim()], queryFn: () => api<{ items: Found[] }>(`/connections/${cid}/sales-orders/products?q=${encodeURIComponent(text.trim())}&limit=10`), enabled: !!cid && text.trim().length >= 2 });
-  const body = lines.map((l) => ({ product_id: l.product_id, qty: Number(l.qty), price_unit: Number(l.price), discount: Number(l.discount || 0) }));
-  const valid = !!customer && lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && l.price !== "" && Number(l.price) >= 0);
+  const body = lines.map((l) => ({ product_id: l.product_id, qty: Number(l.qty), ...(l.price !== "" ? { price_unit: Number(l.price) } : {}), discount: Number(l.discount || 0) }));
+  const valid = !!customer && lines.length > 0 && lines.every((l) => Number(l.qty) > 0 && (l.price === "" || Number(l.price) >= 0));
   const quote = useQuery({ queryKey: ["so-quote", cid, JSON.stringify(body)], queryFn: () => api<{ untaxed: number; total: number; currency: string }>(`/connections/${cid}/sales-orders/quote`, { body: { lines: body, ...(customer ? { partner_id: customer.id } : {}) } }), enabled: !!cid && valid, placeholderData: (p) => p, retry: false });
   const payload = { partner_id: customer?.id ?? 0, lines: body, deliver_now: deliver, invoice_now: invoice, ...(invoice ? { due_days: Number(days || 0) } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
@@ -65,7 +65,7 @@ export default function NewSalesOrderPage() {
         {text.trim().length >= 2 && found.data && (
           <ul className="divide-y divide-line rounded-2xl border border-line">
             {found.data.items.filter((p) => !lines.some((l) => l.product_id === p.product_id)).map((p) => (
-              <li key={p.product_id}><button type="button" onClick={() => { setLines([...lines, { product_id: p.product_id, name: p.name, qty: "1", price: String(p.price), discount: "", on_hand: p.on_hand }]); setText(""); }} className="flex min-h-12 w-full items-center justify-between px-4 text-start hover:bg-surface2">
+              <li key={p.product_id}><button type="button" onClick={() => { setLines([...lines, { product_id: p.product_id, name: p.name, qty: "1", price: customer?.pricelist_id ? "" : String(p.price), discount: "", on_hand: p.on_hand }]); setText(""); }} className="flex min-h-12 w-full items-center justify-between px-4 text-start hover:bg-surface2">
                 <span className="font-bold" dir="auto">{p.name}</span><span className="flex items-center gap-3 text-sm text-soft"><span dir="ltr">{money(p.price)}</span>{p.on_hand !== null && <span dir="ltr">{t("prod_stock")}: {p.on_hand}</span>}<Plus className="size-5 text-brand" aria-hidden /></span></button></li>
             ))}
           </ul>
@@ -78,9 +78,9 @@ export default function NewSalesOrderPage() {
             <div key={l.product_id} className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[1fr_5.5rem_7rem_4.5rem_6rem_2.75rem]">
               <span className="col-span-2 min-w-0 sm:col-span-1"><span className="block truncate font-bold" dir="auto">{l.name}</span>{l.on_hand !== null && Number(l.qty) > l.on_hand && <span className="text-xs font-bold text-warn">{t("so_stock_low")} ({l.on_hand})</span>}</span>
               <input aria-label={t("po_qty")} type="number" inputMode="decimal" min="0" step="any" value={l.qty} onChange={(e) => set(i, "qty", e.target.value)} dir="ltr" className="min-h-11 w-full rounded-xl border border-line bg-surface px-2 text-center" />
-              <input aria-label={t("so_unit_price")} type="number" inputMode="decimal" min="0" step="any" value={l.price} onChange={(e) => set(i, "price", e.target.value)} dir="ltr" className="min-h-11 w-full rounded-xl border border-line bg-surface px-2 text-center" />
+              <input aria-label={t("so_unit_price")} type="number" inputMode="decimal" min="0" step="any" placeholder={customer?.pricelist ?? ""} value={l.price} onChange={(e) => set(i, "price", e.target.value)} dir="ltr" className="min-h-11 w-full rounded-xl border border-line bg-surface px-2 text-center" />
               <input aria-label={t("pos_discount")} type="number" inputMode="decimal" min="0" max="100" step="any" placeholder="0" value={l.discount} onChange={(e) => set(i, "discount", e.target.value)} dir="ltr" className="min-h-11 w-full rounded-xl border border-line bg-surface px-2 text-center" />
-              <span className="text-center font-black" dir="ltr">{money(Number(l.qty || 0) * Number(l.price || 0) * (1 - Number(l.discount || 0) / 100))}</span>
+              <span className="text-center font-black" dir="ltr">{l.price === "" ? "…" : money(Number(l.qty || 0) * Number(l.price || 0) * (1 - Number(l.discount || 0) / 100))}</span>
               <button type="button" aria-label="remove" onClick={() => setLines(lines.filter((_, j) => j !== i))} className="grid size-11 place-items-center rounded-xl text-bad hover:bg-badsoft"><Trash2 className="size-5" aria-hidden /></button>
             </div>
           ))}

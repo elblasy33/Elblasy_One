@@ -54,6 +54,9 @@ class BusinessProfile(BaseModel):
     sells_on_credit: bool = False
     credit_limits: bool = False
     wholesale_prices: bool = False
+    loyalty: bool = (
+        False  # points for customers and promotions (computed by Elblasy One, stored in Odoo)
+    )
     vat: Vat | None = None
     # --- buying and stock
     buys_from_suppliers: bool = True
@@ -171,6 +174,8 @@ QUESTIONS: tuple[Question, ...] = (
     Question("credit_limits", "bool", _t("عايز حد أقصى للمديونية لكل زبون؟", "Do you want a maximum debt per customer?"),
              when={"sells_on_credit": True}, stage="money", default=True),
     Question("wholesale_prices", "bool", _t("في أسعار مختلفة لنفس الصنف (قطاعي وجملة)؟", "Different prices for the same item (retail and wholesale)?"),
+             stage="money", default=False),
+    Question("loyalty", "bool", _t("عايز نقاط ولاء للزباين وعروض (زي اشتري 2 والتالت مجانًا)؟", "Do you want loyalty points and promotions (like buy 2, get the 3rd free)?"),
              stage="money", default=False),
     Question("vat", "choice", _t("وضعك مع ضريبة القيمة المضافة؟", "Your VAT situation?"), (
         _o("not_registered", "مش مسجّل، أسعاري من غير ضريبة", "Not registered; my prices carry no tax"),

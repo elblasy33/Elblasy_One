@@ -13,6 +13,9 @@ BASE_MODULES = ("account", "sale_management", "purchase", "stock", "stock_accoun
 # feature -> modules it needs (installed only through an approved plan)
 FEATURE_MODULES: dict[str, tuple[str, ...]] = {
     "manufacturing": ("mrp",),
+    "loyalty": (
+        "loyalty",
+    ),  # Odoo keeps the programmes and points; Elblasy One applies them at the till
     "expiry": ("product_expiry",),
     "weighing": ("barcodes",),
 }
@@ -111,6 +114,7 @@ FEATURE_EFFECTS: dict[str, dict[str, str]] = {
     "credit_sales": {"ar": "البيع بالآجل وكشف حساب لكل زبون", "en": "Sales on credit and a statement per customer"},
     "credit_limits": {"ar": "حد أقصى لمديونية كل زبون", "en": "A maximum debt per customer"},
     "supplier_credit": {"ar": "فواتير موردين بالآجل ومتابعة المستحق", "en": "Supplier bills on credit and what you owe"},
+    "loyalty": {"ar": "نقاط ولاء للزباين وعروض على الأصناف", "en": "Loyalty points and promotions"},
     "pricelists": {"ar": "أسعار قطاعي وجملة لنفس الصنف", "en": "Retail and wholesale prices for the same item"},
     "services": {"ar": "بيع خدمات من غير مخزون", "en": "Sell services without stock"},
     "sales_orders": {"ar": "أوامر بيع للتجار بأسعارها وفواتيرها", "en": "Sales orders for traders, with their prices and invoices"},
@@ -170,6 +174,8 @@ def resolve_features(t: Template, p: BusinessProfile) -> set[str]:
             f.add("scale_labels")
         if p.wholesale_prices:
             f.add("pricelists")
+        if p.loyalty:
+            f.add("loyalty")
         if "services" in p.sells:
             f.add("services")
         if set(p.channels) & {"orders", "delivery"}:

@@ -129,7 +129,7 @@ export interface AuditItem { id: number; ts: string; action: string; outcome: st
 export interface OperationItem { id: string; type: string; status: string; actor: string; created_at: string; updated_at: string; safe_error?: string; verified: boolean; needs_attention: boolean }
 export interface AlertItem { key: string; severity: "critical" | "warning" | "info"; count: number; permission: string; link: string; detail: Record<string, unknown> }
 
-export interface Customer { id: number; name: string; phone?: string; email?: string; credit_limit?: number; receivable?: number; available_credit?: number | null }
+export interface Customer { id: number; name: string; phone?: string; email?: string; credit_limit?: number; receivable?: number; available_credit?: number | null; pricelist_id?: number | null; pricelist?: string | null }
 export interface CustomerInvoice { id: number; name?: string; date?: string; due?: string; amount_total: number; amount_residual: number; payment_state: string; move_type: string }
 export interface CustomerStatement { customer: Customer; invoices: CustomerInvoice[]; payments: { id: number; name: string; date: string; amount: number; journal: string }[] }
 export interface Receivables { total: number; customers: number; top: { name: string; owed: number }[]; overdue: { count: number; amount: number }; currency: string }

@@ -1,5 +1,5 @@
 "use client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Banknote } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -13,7 +13,7 @@ import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
 import { PAY_KEY } from "@/lib/purchasing";
 import { useActiveConnection, useCustomerStatement, useMe } from "@/lib/queries";
-import type { CustomerInvoice } from "@/lib/types";
+import type { Customer, CustomerInvoice } from "@/lib/types";
 
 function Collect({ cid, inv, onClose, onDone }: { cid: string; inv: CustomerInvoice; onClose: () => void; onDone: () => void }) {
   const { t } = useLang();
@@ -39,6 +39,29 @@ function Collect({ cid, inv, onClose, onDone }: { cid: string; inv: CustomerInvo
   );
 }
 
+function CustomerPricelist({ cid, customer }: { cid: string; customer: Customer }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const keyFor = useIdempotencyKey();
+  const canEdit = !!useMe().data?.permissions.includes("sales.price.override");
+  const lists = useQuery({ queryKey: ["pricelists", cid], queryFn: () => api<{ enabled: boolean; items: { id: number; name: string }[] }>(`/connections/${cid}/pricelists`) });
+  const m = useMutation({
+    mutationFn: (pricelist_id: number | null) => api(`/connections/${cid}/customers/${customer.id}/pricelist`, { method: "PUT", body: { pricelist_id }, headers: { "Idempotency-Key": keyFor({ c: customer.id, pricelist_id }) } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["customer-statement"] }); void qc.invalidateQueries({ queryKey: ["pricelists"] }); },
+  });
+  if (!lists.data?.enabled || !lists.data.items.length) return null;
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3">
+      <span className="font-bold">{t("cu_pricelist")}</span>
+      <select aria-label={t("cu_pricelist")} disabled={!canEdit || m.isPending} value={customer.pricelist_id ?? ""} onChange={(e) => m.mutate(e.target.value ? Number(e.target.value) : null)}
+        className="min-h-11 rounded-xl border border-line bg-surface px-3 font-bold">
+        <option value="">{t("cu_pricelist_none")}</option>
+        {lists.data.items.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    </Card>
+  );
+}
+
 export default function CustomerStatementPage() {
   const { t } = useLang();
   const { id } = useParams<{ id: string }>();
@@ -61,6 +84,7 @@ export default function CustomerStatementPage() {
         <span className="font-bold">{t("cu_total_owed")}</span><span className="text-3xl font-black" dir="ltr">{money(s.customer.receivable ?? 0)}</span>
         {!!s.customer.credit_limit && <span className="w-full text-sm text-soft">{t("cu_limit")}: <b dir="ltr">{money(s.customer.credit_limit)}</b>{s.customer.available_credit != null && <> · {t("cu_available")}: <b dir="ltr">{money(s.customer.available_credit)}</b></>}</span>}
       </Card>
+      {cid && <CustomerPricelist cid={cid} customer={s.customer} />}
       <Card className="space-y-2">
         <h2 className="text-lg font-black">{t("cu_invoices")}</h2>
         {s.invoices.length === 0 ? <p className="text-soft">{t("cu_no_inv")}</p> : (

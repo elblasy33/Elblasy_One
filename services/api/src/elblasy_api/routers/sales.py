@@ -49,6 +49,7 @@ class SaleLine(BaseModel):
 class QuoteIn(BaseModel):
     config_id: int = Field(gt=0)
     lines: list[SaleLine] = Field(min_length=1, max_length=200)
+    partner_id: int | None = Field(default=None, gt=0)  # the customer's own price list applies
 
 
 class PaymentIn(BaseModel):

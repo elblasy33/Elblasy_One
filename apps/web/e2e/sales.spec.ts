@@ -271,6 +271,7 @@ test("shortcuts can be changed per device: new key, conflict swap, risky and ref
   await page.keyboard.press("F6");
   await expect(page.getByRole("heading", { name: "الدفع" })).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toHaveCount(0); // closed before the next key
   await page.keyboard.press("F1");
   await expect(page.getByRole("link", { name: "تعديل الاختصارات" })).toBeVisible();
 });

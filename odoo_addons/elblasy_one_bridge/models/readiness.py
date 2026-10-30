@@ -16,7 +16,7 @@ CORE_AUTHORS = {"odoosa", "odoo"}
 # Modules the platform may ever plan to install (also the executor's allowlist later).
 PLANNABLE_MODULES = (
     "account", "sale_management", "purchase", "stock", "stock_account", "point_of_sale",
-    "mrp", "product_expiry", "barcodes", "uom", "sale_stock", "purchase_stock",
+    "mrp", "product_expiry", "barcodes", "uom", "sale_stock", "purchase_stock", "loyalty",
 )  # fmt: skip
 
 

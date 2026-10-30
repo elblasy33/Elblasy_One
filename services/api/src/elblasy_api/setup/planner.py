@@ -56,6 +56,7 @@ MODULE_LABELS: dict[str, tuple[str, str]] = {
     "stock_account": ("تقييم المخزون", "Inventory valuation"),
     "point_of_sale": ("نقطة البيع", "Point of Sale"), "mrp": ("التصنيع", "Manufacturing"),
     "product_expiry": ("تواريخ الصلاحية", "Expiry dates"), "barcodes": ("الباركود", "Barcodes"),
+    "loyalty": ("الولاء والعروض", "Loyalty and promotions"),
 }  # fmt: skip
 
 

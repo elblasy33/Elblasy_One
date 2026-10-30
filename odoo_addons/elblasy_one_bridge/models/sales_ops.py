@@ -167,8 +167,14 @@ class ElblasyBridgeSales(models.AbstractModel):
         )
 
     @api.model
-    def _price_for(self, cfg, product, qty):
-        pl = cfg.pricelist_id if "pricelist_id" in cfg._fields else False
+    def _pricelist_for(self, cfg, partner=None):
+        """The customer's own price list when one was set for them (wholesale, special prices), else the till's."""
+        own = partner.specific_property_product_pricelist if partner and "specific_property_product_pricelist" in partner._fields else False
+        return own or (cfg.pricelist_id if "pricelist_id" in cfg._fields else False)
+
+    @api.model
+    def _price_for(self, cfg, product, qty, partner=None):
+        pl = self._pricelist_for(cfg, partner)
         if pl and hasattr(pl, "_get_product_price"):
             return pl._get_product_price(product, qty)
         return product.lst_price
@@ -186,7 +192,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                 raise UserError("A product in the sale is not available for sale.")
             qty = _num(raw.get("qty"), "quantity", minimum=0.0001, maximum=1e6)
             disc = _num(raw.get("discount", 0), "discount", maximum=100.0)
-            unit = self._price_for(cfg, product, qty)
+            unit = self._price_for(cfg, product, qty, partner)
             if raw.get("price_override") is not None:  # allowed only for authorised users (the platform checks and audits)
                 unit = _num(raw["price_override"], "price")
             taxes = product.taxes_id.filtered(lambda t: t.company_id == cfg.company_id)
@@ -286,7 +292,8 @@ class ElblasyBridgeSales(models.AbstractModel):
         self._require_internal_user()
         self._need_pos()
         cfg = self._config(spec.get("config_id"))
-        quoted, total, tax = self._quote_lines(cfg, spec.get("lines"))
+        partner = self.env["res.partner"].browse(int(spec.get("partner_id") or 0)).exists() if spec.get("partner_id") else None
+        quoted, total, tax = self._quote_lines(cfg, spec.get("lines"), partner or None)
         return wire({"lines": quoted, "total": total, "tax": tax, "currency": cfg.currency_id.name})
 
     @api.model
@@ -572,8 +579,9 @@ class ElblasyBridgeSales(models.AbstractModel):
         note_field = self._note_field()
         if note_field and spec.get("note"):
             order[note_field] = str(spec["note"])[:200]
-        if "pricelist_id" in cfg._fields and cfg.pricelist_id:
-            order["pricelist_id"] = cfg.pricelist_id.id
+        pl = self._pricelist_for(cfg, partner)
+        if pl:
+            order["pricelist_id"] = pl.id
         if "default_fiscal_position_id" in cfg._fields and cfg.default_fiscal_position_id:
             order["fiscal_position_id"] = cfg.default_fiscal_position_id.id
         Order.sync_from_ui([order])
