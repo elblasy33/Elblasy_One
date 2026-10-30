@@ -1,9 +1,9 @@
 "use client";
-import { Boxes, ChevronsLeft, ChevronsRight, ClipboardList, FileText, LayoutDashboard, Languages, Lock, LogOut, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
+import { Boxes, ChevronsLeft, ChevronsRight, ClipboardList, FileText, LayoutDashboard, Languages, Lock, LogOut, Menu, Settings, ShoppingCart, Store, Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useLang, type TKey } from "@/lib/i18n";
@@ -35,6 +35,10 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
   const off = (i: Item) => !!i.cap && caps?.[i.cap] === false;
   const isAdmin = me.permissions.includes("config.manage");
   const items = ITEMS.filter((i) => (i.any.length === 0 || i.any.some((p) => me.permissions.includes(p))) && (!off(i) || isAdmin));
+  // phones: four main places in the bar, everything else under "More"
+  const main = items.length > 5 ? items.slice(0, 4) : items;
+  const extra = items.length > 5 ? items.slice(4) : [];
+  const [more, setMore] = useState(false);
   const isActive = (i: Item) => {
     if (i.not?.some((n) => path === n || path.startsWith(`${n}/`))) return false;
     return (i.match ?? [i.href]).some((m) => path === m || path.startsWith(`${m}/`));
@@ -80,8 +84,25 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
       <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-10 md:pb-10">
         <div className={cn("mx-auto w-full transition-[max-width] duration-300", slim || path === "/sales" ? "max-w-7xl" : "max-w-4xl")}>{children}</div>
       </main>
+      {more && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMore(false)}>
+          <nav aria-label={t("nav_more")} className="absolute inset-x-2 bottom-20 space-y-1 rounded-2xl border border-line bg-surface p-2 shadow-card" onClick={(e) => e.stopPropagation()}>
+            {extra.map((i) => (
+              <Link key={i.href} href={i.href} onClick={() => setMore(false)} aria-current={isActive(i) ? "page" : undefined}
+                className={cn("flex min-h-12 items-center gap-3 rounded-xl px-4 font-bold", isActive(i) ? "bg-brandsoft text-brand" : "text-ink hover:bg-surface2")}>
+                <i.icon className="size-5" aria-hidden /> {t(i.label)}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      )}
       <nav aria-label={t("nav_menu")} className="fixed inset-x-0 bottom-0 z-20 flex border-t border-line bg-surface/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-        {items.map((i) => {
+        {extra.length > 0 && (
+          <button onClick={() => setMore(!more)} aria-expanded={more} className={cn("order-last flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-[11px] font-bold", more || extra.some(isActive) ? "text-brand" : "text-soft")}>
+            <Menu className="size-6" aria-hidden /><span>{t("nav_more")}</span>
+          </button>
+        )}
+        {main.map((i) => {
           const active = isActive(i);
           return (
             <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined}

@@ -20,8 +20,21 @@ from elblasy_api.security.rbac import P_CONFIG, Role
 from elblasy_api.security.vault import SecretVault
 from elblasy_api.setup.executor import DriftError, execute_plan
 from elblasy_api.setup.planner import build_plan
-from elblasy_api.setup.profile import BusinessProfile, build_profile, visible_questions
-from elblasy_api.setup.templates import TEMPLATES
+from elblasy_api.setup.profile import (
+    STAGES,
+    BusinessProfile,
+    build_profile,
+    is_legacy,
+    visible_questions,
+)
+from elblasy_api.setup.templates import (
+    FEATURE_EFFECTS,
+    TEMPLATES,
+    limitations,
+    resolve_features,
+    template_for,
+    unsupported_combinations,
+)
 
 router = APIRouter(tags=["setup"])
 
@@ -46,32 +59,54 @@ def list_templates(_: User = Depends(current_user)) -> list[dict[str, Any]]:
 
 @router.post("/setup/questionnaire")
 def questionnaire(body: AnswersIn, _: User = Depends(current_user)) -> dict[str, Any]:
-    """Stateless: send the answers so far, get the questions that currently apply."""
+    """Stateless: send the answers so far, get the questions that currently apply (grouped in stages),
+    and a live preview of what those answers switch on. Unanswered questions take their defaults, so
+    the profile is always complete; the wizard only decides when the owner has reviewed it."""
+    legacy = is_legacy(body.answers)
     qs = visible_questions(body.answers)
     answered = {q.id for q in qs if q.id in body.answers}
-    complete = "vertical" in body.answers and all(
-        q.id in answered or q.default is not None for q in qs
-    )
+    if legacy:
+        complete = "vertical" in body.answers and all(
+            q.id in answered or q.default is not None for q in qs
+        )
+    else:  # unanswered questions take their defaults; the VAT question may stay open (reported in the plan)
+        complete = "sells" in body.answers
     profile = None
-    if complete:
-        try:
-            profile = build_profile(body.answers).model_dump()
-        except ValidationError as exc:
-            raise api_error(422, "invalid_answers", str(exc.errors()[0]["msg"])) from exc
+    preview: dict[str, Any] = {}
+    try:
+        p = build_profile(body.answers)
+        if complete or not legacy:
+            profile = p.model_dump() if complete else None
+            feats = resolve_features(template_for(p), p)
+            preview = {"features": sorted(feats), "effects": [FEATURE_EFFECTS[f] | {"feature": f} for f in sorted(feats) if f in FEATURE_EFFECTS],
+                       "limitations": limitations(p), "unsupported": unsupported_combinations(p, feats)}  # fmt: skip
+    except ValidationError as exc:
+        raise api_error(422, "invalid_answers", str(exc.errors()[0]["msg"])) from exc
+
+    def opt(o: Any) -> Any:
+        return {"value": o.value, "text": o.text, "hint": o.hint} if hasattr(o, "value") else o
+
     return {
+        "legacy": legacy,
+        "stages": [] if legacy else list(STAGES),
         "questions": [
             {
                 "id": q.id,
                 "kind": q.kind,
                 "text": q.text,
-                "options": list(q.options),
+                "options": [opt(o) for o in q.options],
                 "default": q.default,
                 "answered": q.id in body.answers,
+                "stage": q.stage,
+                "hint": q.hint,
+                "min": q.minimum,
+                "max": q.maximum,
             }
             for q in qs
         ],  # fmt: skip
         "complete": complete,
         "profile": profile,
+        "preview": preview,
     }
 
 

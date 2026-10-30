@@ -18,6 +18,7 @@ from elblasy_api.odoo.client import BridgeClient, OdooError, OdooRejectedError, 
 from elblasy_api.routers.connections import _client, _owned
 from elblasy_api.security.rbac import P_COST_VISIBLE, P_PRODUCTS, P_PRODUCTS_VIEW, has_permission
 from elblasy_api.security.vault import SecretVault
+from elblasy_api.setup.planner import shop_features
 
 router = APIRouter(prefix="/connections/{cid}/catalog", tags=["catalog"])
 IDEM = Annotated[
@@ -36,7 +37,7 @@ class ProductIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     price: float = Field(ge=0, le=1e9)
     cost: float | None = Field(default=None, ge=0, le=1e9)
-    kind: Literal["unit", "weight"] = "unit"
+    kind: Literal["unit", "weight", "service"] = "unit"
     barcode: str | None = None
     auto_barcode: Literal["none", "internal", "scale"] = "none"
     category: str | None = Field(default=None, max_length=100)
@@ -112,14 +113,28 @@ def _take(db: Session, cid: uuid.UUID, kind: str) -> int:
     raise api_error(503, "sequence_busy", "Could not allocate a barcode, try again")
 
 
-def _make_barcode(db: Session, cid: uuid.UUID, kind: str) -> str:
-    n = _take(db, cid, kind)
-    try:
-        return scale_barcode(n) if kind == "scale" else internal_barcode(n)
-    except ValueError as exc:
-        raise api_error(
-            409, "barcode_space_exhausted", "No more automatic barcodes available"
-        ) from exc
+def _make_barcode(
+    db: Session, cid: uuid.UUID, kind: str, client: BridgeClient | None = None
+) -> str:
+    """Next automatic barcode that Odoo does not already use. Numbers are per connection, so a second
+    connection (or a re-connect) to the same Odoo would otherwise walk into codes already taken: each
+    candidate is checked against Odoo (one fast read) and taken ones are skipped, keeping codes sequential."""
+    for _ in range(200):
+        try:
+            n = _take(db, cid, kind)
+            code = scale_barcode(n) if kind == "scale" else internal_barcode(n)
+        except ValueError as exc:
+            raise api_error(
+                409, "barcode_space_exhausted", "No more automatic barcodes available"
+            ) from exc
+        if client is None:
+            return code
+        try:
+            if code not in client.call_bridge("catalog_barcodes_taken", [code]).get("taken", []):
+                return code
+        except OdooError:
+            return code  # Odoo still refuses a duplicate on create; the caller then retries
+    raise api_error(409, "barcode_space_exhausted", "No free automatic barcode found")
 
 
 def _spec(p: ProductIn, barcode: str | None) -> dict[str, Any]:
@@ -153,7 +168,7 @@ def create_product(
     planned = (op.odoo_refs or {}).get("planned_barcode")
     barcode = p.barcode or planned
     if not barcode and p.auto_barcode != "none":
-        barcode = _make_barcode(db, c.id, p.auto_barcode)
+        barcode = _make_barcode(db, c.id, p.auto_barcode, client)
     # persist the chosen barcode before calling Odoo so a retry reuses it
     op.odoo_refs = {"planned_barcode": barcode} if barcode else None
     db.commit()
@@ -163,7 +178,18 @@ def create_product(
     for attempt in range(attempts):
         try:
             res = client.call_bridge(
-                "catalog_upsert_product", str(op.id), key, _spec(p, barcode), timeout=60
+                "catalog_upsert_product",
+                str(op.id),
+                key,
+                {
+                    **_spec(p, barcode),
+                    **(
+                        {"no_tax": True}
+                        if "no_sales_tax" in shop_features(db, user.tenant_id, c.id)
+                        else {}
+                    ),
+                },
+                timeout=60,
             )
             break
         except OdooUncertainError as exc:
@@ -176,8 +202,8 @@ def create_product(
         except OdooRejectedError as exc:
             if "already used" in str(exc) and p.auto_barcode != "none" and attempt < attempts - 1:
                 barcode = _make_barcode(
-                    db, c.id, p.auto_barcode
-                )  # collision with an existing code: next one
+                    db, c.id, p.auto_barcode, client
+                )  # collision: next free one
                 op.odoo_refs = {"planned_barcode": barcode}
                 db.commit()
                 continue

@@ -92,8 +92,8 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         name = _clean_text(spec.get("name"), "name", 200)
         price = _number(spec.get("list_price", 0), "price")
         kind = spec.get("kind", "unit")
-        if kind not in ("unit", "weight"):
-            raise UserError("kind must be 'unit' or 'weight'.")
+        if kind not in ("unit", "weight", "service"):
+            raise UserError("kind must be 'unit', 'weight' or 'service'.")
         tracking = spec.get("tracking", "none")
         if tracking not in ("none", "lot", "serial"):
             raise UserError("tracking must be 'none', 'lot' or 'serial'.")
@@ -103,9 +103,15 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         vals = {"name": name, "list_price": price, "type": "consu", "sale_ok": True, "purchase_ok": True}
         if "cost" in spec and spec["cost"] is not None:
             vals["standard_price"] = _number(spec["cost"], "cost")
-        if self._installed("stock"):
+        if kind == "service":  # sold, never stocked
+            vals["type"] = "service"
+            if tracking != "none":
+                raise UserError("A service cannot be tracked by lot or serial.")
+        elif self._installed("stock"):
             vals["is_storable"] = True
             vals["tracking"] = tracking
+        if spec.get("no_tax"):  # the owner said the business is not VAT-registered
+            vals["taxes_id"] = [(6, 0, [])]
         if spec.get("sku"):
             vals["default_code"] = _clean_text(spec["sku"], "sku", 64)
         if spec.get("category"):
@@ -165,7 +171,7 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         self._require_internal_user()
         limit = max(1, min(int(limit or 25), SEARCH_LIMIT_MAX))
         offset = max(0, int(offset or 0))
-        domain = [("type", "=", "consu")]
+        domain = [("type", "in", ("consu", "service"))]
         q = (query or "").strip()
         if q:
             domain += ["|", "|", ("name", "ilike", q), ("barcode", "ilike", q), ("default_code", "ilike", q)]

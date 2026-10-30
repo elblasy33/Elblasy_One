@@ -182,3 +182,55 @@ test("register conveniences: product grid, numpad quantity/price, parked orders 
   await expect(page.getByText(/4 × /).first()).toBeVisible();
   expect(pid).toBeGreaterThan(0);
 });
+
+test("keyboard-only till: quantity before scan, name search with arrows, quick quantity keys, Enter to pay exact", async ({ page }) => {
+  const { barcode, pid, cid } = await seed(page.request);
+  const tag = String(Date.now() % 100000);
+  const extra = await page.request.post(`/api/connections/${cid}/catalog/products`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: `شاي الضحى ${tag}`, price: 10 } });
+  expect(extra.status()).toBe(201);
+  await page.goto("/sales");
+  const box = page.getByLabel("امسح الباركود أو ابحث باسم المنتج");
+  const opening = page.getByLabel("النقدية الافتتاحية");
+  await expect(opening.or(box)).toBeVisible(); // the shift may still be open from the previous test
+  if (await opening.isVisible()) {
+    await opening.fill("0");
+    await page.getByRole("button", { name: "فتح الخزنة" }).click();
+  }
+  await expect(box).toBeFocused();
+
+  // supermarket habit: quantity, *, then the scan (the scanner types the code and Enter)
+  await page.keyboard.type(`3*${barcode}`);
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/^3 × /).first()).toBeVisible();
+
+  // name search on the device, Arabic spelling differences ignored, arrows + Enter
+  await page.keyboard.type(`شاى الضحي ${tag}`); // ى and ي swapped on purpose
+  await expect(page.getByRole("listbox", { name: "المنتجات" }).getByText(`شاي الضحى ${tag}`)).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: new RegExp(`شاي الضحى ${tag}`) }).first()).toBeVisible();
+  await expect(page.getByText(/^1 × /).first()).toBeVisible();
+
+  // correct the quantity of the selected line, then nudge it with +
+  await page.keyboard.type("*2");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/^2 × /).first()).toBeVisible();
+  await page.keyboard.press("+");
+  await expect(page.getByText(/^3 × /)).toHaveCount(2); // the scanned tea and the searched one
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+
+  // shortcuts are discoverable
+  await page.keyboard.press("F1");
+  await expect(page.getByRole("heading", { name: "اختصارات الكيبورد" })).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/29-shortcuts.png", fullPage: true });
+  await page.keyboard.press("Escape");
+
+  // Enter on the empty box opens payment; Enter with no amount pays exactly; Enter starts the next sale
+  await box.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("تم البيع")).toBeVisible();
+  expect((await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] }))[0].qty_available).toBe(17);
+  await page.keyboard.press("Enter");
+  await expect(box).toBeFocused();
+});

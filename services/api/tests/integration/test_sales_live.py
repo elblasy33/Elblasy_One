@@ -627,3 +627,29 @@ def test_register_browse_by_category_page_images_and_price_override(shop):
         cashier.post(f"{base}/quote", json={"config_id": cfg, "lines": [line]}).status_code == 403
     )
     assert any(x["action"] == "sales.order.create" for x in client.get("/audit").json()["items"])
+
+
+def test_till_catalog_and_item_code_lookup(shop):
+    client, cid, url, db, cfg, cash = shop
+    a, _ = product(
+        client, cid, url, db, name="بن محوج", price=120, sku="BN-250", barcode="6221111222333"
+    )
+    base = f"/connections/{cid}/sales"
+    cat = client.get(f"{base}/catalog", params={"config_id": cfg}).json()
+    rows = [dict(zip(cat["fields"], r, strict=True)) for r in cat["rows"]]
+    row = next(r for r in rows if r["id"] == a)
+    assert (row["name"], row["barcode"], row["code"], row["price"]) == (
+        "بن محوج",
+        "6221111222333",
+        "BN-250",
+        120,
+    )
+    assert cat["truncated"] is False
+    by_code = client.get(
+        f"{base}/lookup", params={"config_id": cfg, "code": "bn-250"}
+    ).json()  # case-insensitive
+    assert by_code["found"] and by_code["product_id"] == a and by_code["qty"] == 1
+    assert (
+        client.get(f"{base}/lookup", params={"config_id": cfg, "code": "NOPE-1"}).json()["found"]
+        is False
+    )

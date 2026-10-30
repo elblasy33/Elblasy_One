@@ -11,11 +11,15 @@ export interface Connection {
   capabilities: Record<string, boolean> | null; last_health_ok_at: string | null;
 }
 
+export interface QOption { value: string; text: Bilingual; hint?: Bilingual | null }
 export interface Question {
   id: string; kind: "choice" | "bool" | "number" | "multi"; text: Bilingual;
-  options: string[]; default: unknown; answered: boolean;
+  options: (QOption | string)[]; default: unknown; answered: boolean; stage: string; hint?: Bilingual | null; min?: number | null; max?: number | null;
 }
-export interface QuestionnaireOut { questions: Question[]; complete: boolean; profile: Record<string, unknown> | null }
+export interface QuestionnaireOut {
+  legacy: boolean; stages: { id: string; title: Bilingual; intro: Bilingual }[]; questions: Question[]; complete: boolean; profile: Record<string, unknown> | null;
+  preview: { features?: string[]; effects?: (Bilingual & { feature: string })[]; limitations?: (Bilingual & { code: string })[]; unsupported?: { code: string; reason: string }[] };
+}
 
 export interface PlanStep {
   key: string; kind: string; title: Bilingual; params: Record<string, unknown>;

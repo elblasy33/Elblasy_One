@@ -309,6 +309,9 @@ class ElblasyBridgeSales(models.AbstractModel):
         if not product:  # a weighed barcode's base_code carries the zero-weight form
             product = P.search([("barcode", "=", code), ("available_in_pos", "=", True)], limit=1)
             qty = 1.0
+        if not product:  # the shop's own item code (internal reference), typed at the till
+            product = P.search([("default_code", "=ilike", code), ("available_in_pos", "=", True), ("sale_ok", "=", True)], limit=1)
+            qty = 1.0
         if not product:
             return wire({"found": False})
         return wire(
@@ -354,6 +357,27 @@ class ElblasyBridgeSales(models.AbstractModel):
                 }
             )
         return wire({"items": out})
+
+    @api.model
+    def sales_catalog(self, config_id):
+        """Everything the till can sell, compact, loaded once when the register opens so scanning, item codes
+        and name search answer instantly on the device. Prices are indicative; the sale is always re-priced by
+        Odoo (quote and checkout), so a price changed meanwhile never slips through."""
+        self._require_internal_user()
+        self._need_pos()
+        cfg = self._config(config_id)
+        P = self.env["product.product"]
+        # names without the "[code]" prefix: the code travels in its own column and is searchable on its own
+        prods = P.with_context(display_default_code=False).search(
+            [("available_in_pos", "=", True), ("sale_ok", "=", True)], limit=20000, order="name, id"
+        )
+        rows = []
+        for p in prods:
+            rows.append([p.id, p.display_name, p.barcode or "", p.default_code or "", self._price_for(cfg, p, 1.0),
+                         1 if ("to_weight" in p._fields and p.to_weight) else 0,
+                         p.tracking if "tracking" in p._fields else "none"])  # fmt: skip
+        return wire({"fields": ["id", "name", "barcode", "code", "price", "by_weight", "tracking"], "rows": rows,
+                     "truncated": len(prods) >= 20000})  # fmt: skip
 
     @api.model
     def sales_categories(self, config_id):

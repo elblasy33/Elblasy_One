@@ -16,6 +16,7 @@ from elblasy_api.setup.templates import (
     FEATURE_MODULES,
     TEMPLATE_SCHEMA_VERSION,
     Template,
+    limitations,
     resolve_features,
     template_for,
     unsupported_combinations,
@@ -208,7 +209,8 @@ def build_plan(
     # --- features that are Odoo settings ---
     for fkey, label in (("variants", _t("المقاسات والألوان", "Sizes & colours (variants)")),
                         ("uom", _t("وحدات القياس المتعددة", "Multiple units of measure")),
-                        ("lots", _t("تتبع الدفعات/الصلاحية", "Lots / expiry tracking"))):  # fmt: skip
+                        ("lots", _t("تتبع الدفعات/الصلاحية", "Lots / expiry tracking")),
+                        ("pricelists", _t("قوائم أسعار (قطاعي وجملة)", "Price lists (retail and wholesale)"))):  # fmt: skip
         if fkey in features:
             on = feat.get(fkey) if isinstance(feat, dict) else None
             deps = [
@@ -234,8 +236,33 @@ def build_plan(
                           impact="Stock is deducted when each sale is made instead of when the session closes.",
                           recovery="The setting can be switched back in Odoo; stock already deducted is not reversed."))  # fmt: skip
 
+    # --- taxes: asked, never guessed ---
+    if "tax_included_prices" in features:
+        fp = snapshot.get("footprint", {})
+        posted = fp.get("posted_moves", 0) if isinstance(fp, dict) else 0
+        on = feat.get("tax_included") if isinstance(feat, dict) else None
+        s = Step("feature_tax_included", "enable_feature",
+                 _t("الأسعار شاملة الضريبة", "Prices include tax"), {"feature": "tax_included"},
+                 "satisfied" if on else "to_apply", True, risk="medium",
+                 impact="Shelf prices are read as tax-included: a product priced 100 sells for 100, tax inside it.",
+                 recovery="Odoo allows switching back only before the first invoice.")  # fmt: skip
+        if not on and posted:
+            s.status, s.blocked_reason = "blocked", ("Odoo allows this only before the first invoice; this database "
+                                                     "already has posted entries. Ask your accountant.")  # fmt: skip
+        steps.append(s)
+    if "no_sales_tax" in features:
+        notes.append({"area": "taxes", "note": "You are not VAT-registered: products created by Elblasy One carry no "
+                      "sales tax. Products that already exist keep their taxes; review them with your accountant."})  # fmt: skip
+    if profile.vertical is None and profile.vat is None:
+        notes.append(
+            {
+                "area": "taxes",
+                "note": "VAT situation not answered: products use Odoo's default sales tax.",
+            }
+        )
+
     # --- weighing scale (native Odoo weight-barcode rule) ---
-    if "weighing" in features:
+    if "scale_labels" in features or (profile.vertical is not None and "weighing" in features):
         bc = snapshot.get("barcode", {})
         patterns = bc.get("weight_rule_patterns", []) if isinstance(bc, dict) else []
         if patterns:
@@ -272,6 +299,7 @@ def build_plan(
         "existing_notes": notes,
         "conflicts": conflicts,
         "unsupported": unsupported,
+        "limitations": limitations(profile),
         "required_approvals": approvals,
         "verification_checks": list(tpl.verification_checks),
         "summary": summary,
@@ -284,3 +312,16 @@ def build_plan(
         {k: snapshot.get(k) for k in ("modules", "accounting", "pos", "features", "inventory")}
     )
     return body
+
+
+def shop_features(db: Any, tenant_id: Any, connection_id: Any) -> set[str]:
+    """Features of the business as last described (latest plan that was not superseded)."""
+    from sqlalchemy import select
+
+    from elblasy_api.models import SetupPlan
+
+    row = db.scalar(
+        select(SetupPlan).where(SetupPlan.tenant_id == tenant_id, SetupPlan.connection_id == connection_id,
+                                SetupPlan.status != "superseded").order_by(SetupPlan.created_at.desc()).limit(1)
+    )  # fmt: skip
+    return set((row.plan or {}).get("features", [])) if row else set()

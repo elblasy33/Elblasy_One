@@ -204,6 +204,19 @@ def search_products(
     return _read(client, "sales_search", config_id, q, limit, category or "", offset)
 
 
+@router.get("/catalog")
+def till_catalog(
+    cid: uuid.UUID, config_id: int = Query(gt=0), user: User = Depends(require(P_SALES)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    """Compact list of everything the till sells, for instant scanning and search on the device."""
+    _, client = _conn(db, user, cid, s, vault)
+    try:
+        return client.call_bridge("sales_catalog", config_id, timeout=60)
+    except OdooError as exc:
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+
+
 @router.get("/categories")
 def categories(
     cid: uuid.UUID, config_id: int = Query(gt=0), user: User = Depends(require(P_SALES)),

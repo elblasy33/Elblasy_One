@@ -191,6 +191,8 @@ class ElblasyBridgeReadiness(models.AbstractModel):
             return {
                 "variants": u.has_group("product.group_product_variant"),
                 "uom": u.has_group("uom.group_uom"),
+                "pricelists": u.has_group("product.group_product_pricelist"),
+                "tax_included": (getattr(env.company, "account_price_include", None) == "tax_included") if has("account") else None,
                 "lots": u.has_group("stock.group_production_lot") if has("stock") else None,
                 # when POS sales deduct stock: at every sale ("real") or only at session close
                 "pos_stock_realtime": (

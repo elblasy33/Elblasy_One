@@ -53,6 +53,7 @@ export default function NewProductPage() {
   const [attrs, setAttrs] = useState<Attr[]>([{ name: "", values: "" }]);
   const [lot, setLot] = useState(false);
   const [serial, setSerial] = useState(false);
+  const [service, setService] = useState(false);
   const [pos, setPos] = useState(true);
   const [made, setMade] = useState(false);
   const [done, setDone] = useState<CreatedProduct | null>(null);
@@ -63,7 +64,7 @@ export default function NewProductPage() {
   const payload = {
     name: name.trim(), price: Number(price || 0),
     ...(canSeeCost && cost !== "" ? { cost: Number(cost) } : {}),
-    kind: byWeight ? "weight" : "unit",
+    kind: service ? "service" : byWeight ? "weight" : "unit",
     ...(mode === "type" && barcode.trim() ? { barcode: barcode.trim() } : {}),
     ...(mode === "internal" ? { auto_barcode: "internal" } : {}),
     ...(mode === "scale" && byWeight ? { auto_barcode: "scale" } : {}),
@@ -123,7 +124,8 @@ export default function NewProductPage() {
         <Field label={t("np_category")} name="category" value={category} onChange={(e) => setCategory(e.target.value)} />
       </Card>
 
-      {(features.has("weighing") || byWeight) && !hasVariants && (
+      {features.has("services") && <Toggle on={service} onChange={(v) => { setService(v); if (v) { setByWeight(false); setLot(false); setSerial(false); } }} hint={t("np_service_hint")}>{t("np_service")}</Toggle>}
+      {(features.has("weighing") || byWeight) && !hasVariants && !service && (
         <Toggle on={byWeight} onChange={(v) => { setByWeight(v); if (!v && mode === "scale") setMode("none"); if (v) setMode("scale"); }} hint={t("np_weight_hint")}>{t("np_weight")}</Toggle>
       )}
 
@@ -168,8 +170,8 @@ export default function NewProductPage() {
       )}
 
       <div className="space-y-3">
-        {features.has("lots") && !serial && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
-        {features.has("serials") && !lot && <Toggle on={serial} onChange={setSerial}>{t("np_serial")}</Toggle>}
+        {features.has("lots") && !serial && !service && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
+        {features.has("serials") && !lot && !service && <Toggle on={serial} onChange={setSerial}>{t("np_serial")}</Toggle>}
         <Toggle on={pos} onChange={setPos}>{t("np_pos")}</Toggle>
         {features.has("manufacturing") && <Toggle on={made} onChange={setMade}>{t("np_made")}</Toggle>}
       </div>
