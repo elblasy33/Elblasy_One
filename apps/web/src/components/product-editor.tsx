@@ -1,12 +1,13 @@
 "use client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 import { Modal } from "@/components/modal";
 import { Button, ErrorBox, Field } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
-import { useCategories } from "@/lib/queries";
+import { useActiveConnection, useCategories } from "@/lib/queries";
 import type { Product } from "@/lib/types";
 
 /** Edits one product (only what changed is sent) and archives / restores it. */
@@ -32,6 +33,7 @@ export function ProductEditor({ cid, product, onClose }: { cid: string; product:
   });
   const err = save.error instanceof ApiError ? save.error : null;
   const archived = product.active === false;
+  const canCompose = useActiveConnection().data?.capabilities?.manufacturing === true && product.variant_count <= 1;
   return (
     <Modal title={t("pe_title")} onClose={onClose}>
       <form method="post" action="#" className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (Object.keys(changes).length) save.mutate(changes); }}>
@@ -50,6 +52,7 @@ export function ProductEditor({ cid, product, onClose }: { cid: string; product:
         <Button type="submit" disabled={!Object.keys(changes).length} loading={save.isPending} className="w-full">{t("pe_save")}</Button>
         <Button type="button" variant={archived ? "soft" : "danger"} onClick={() => save.mutate({ active: archived })} disabled={save.isPending} className="w-full">{archived ? t("pe_restore") : t("pe_archive")}</Button>
         {!archived && <p className="text-xs text-soft">{t("pe_archive_note")}</p>}
+        {canCompose && !archived && <Link href={`/inventory/recipe?template=${product.template_id}`} className="block text-center text-sm font-bold text-brand">{t("pe_compose")}</Link>}
       </form>
     </Modal>
   );

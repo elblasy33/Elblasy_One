@@ -79,6 +79,9 @@ class RecipeIn(BaseModel):
     template_id: int = Field(gt=0)
     quantity: float = Field(default=1, gt=0, le=1e9)
     components: list[RecipeLine] = Field(min_length=1, max_length=50)
+    # manufacture: made in batches (production orders); kit: sold as one item, components leave stock at the sale
+    kind: Literal["manufacture", "kit"] = "manufacture"
+    replace: bool = False  # change an existing recipe (future use only; history stays)
 
 
 def _conn(
@@ -364,6 +367,24 @@ def patch_product(
     )  # fmt: skip
 
 
+@router.get("/recipes/{template_id}")
+def get_recipe(
+    cid: uuid.UUID, template_id: int, user: User = Depends(require(P_PRODUCTS_VIEW)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    _, client = _conn(db, user, cid, s, vault)
+    try:
+        got = client.call_bridge("catalog_get_bom", template_id)
+    except OdooError as exc:
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+    if not has_permission(user.role, P_COST_VISIBLE):  # costs only for those who may see them
+        got.pop("unit_cost", None)
+        got.pop("margin", None)
+        for c in got.get("components", []):
+            c.pop("cost", None)
+    return got
+
+
 @router.post("/recipes", status_code=201)
 def post_recipe(
     cid: uuid.UUID, body: RecipeIn, idem: IDEM, request: Request,
@@ -395,15 +416,29 @@ def post_recipe(
     except OdooError as exc:
         operations.fail(db, op, "needs_review", str(exc))
         raise api_error(502, "odoo_unavailable", str(exc)) from exc
-    out = {**res["refs"], "outcome": res["outcome"], "replayed": False}
-    operations.succeed(
-        db,
-        op,
-        out,
-        {"verified": True, "method": "bridge confirmation (bom id returned by ORM create)"},
-    )
-    audit.record(db, request, action="catalog.recipe.create", outcome="success", actor=user,
-                 target_type="bom", target_id=out["bom_id"])  # fmt: skip
+    # independent check: read the recipe back from Odoo and compare with what was asked
+    try:
+        got = client.call_bridge("catalog_get_bom", body.template_id)
+    except OdooError as exc:
+        operations.fail(db, op, "needs_review", str(exc))
+        raise api_error(
+            502, "verification_unavailable", "Saved, but could not verify. Retry with the same key."
+        ) from exc
+    want = sorted((ln.template_id, round(ln.qty, 6)) for ln in body.components)
+    have = sorted((c["template_id"], round(c["qty"], 6)) for c in got.get("components", []))
+    if (
+        not got.get("found")
+        or got["kind"] != body.kind
+        or abs(got["quantity"] - body.quantity) > 1e-6
+        or want != have
+    ):
+        operations.fail(db, op, "needs_review", "Odoo does not show the recipe as requested")
+        raise api_error(502, "verification_failed", "Odoo does not show the recipe as requested")
+    out = {**res["refs"], "outcome": res["outcome"], "replayed": False, "recipe": got}
+    operations.succeed(db, op, out, {"verified": True, "method": "catalog_get_bom readback"})
+    audit.record(db, request, action="catalog.recipe.update" if res["outcome"] == "updated" else "catalog.recipe.create",
+                 outcome="success", actor=user, target_type="bom", target_id=out["bom_id"],
+                 after={"kind": body.kind, "components": len(body.components)})  # fmt: skip
     db.commit()
     return out
 

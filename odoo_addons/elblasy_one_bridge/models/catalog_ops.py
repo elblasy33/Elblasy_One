@@ -210,6 +210,8 @@ class ElblasyBridgeCatalog(models.AbstractModel):
     # ---- manufacturing recipe ----
     @api.model
     def catalog_set_bom(self, op_id, key, spec):
+        """A recipe (made in batches: manufacturing orders) or a kit (sold as one item; its components leave
+        stock at the sale). With `replace`, an existing recipe's lines are changed for future use; history stays."""
         self._require_internal_user()
         if not isinstance(key, str) or not KEY_RE.match(key):
             raise UserError("Invalid recipe key.")
@@ -219,6 +221,10 @@ class ElblasyBridgeCatalog(models.AbstractModel):
         existing = self._managed(xml_name)
         if existing:
             return {"outcome": "already_exists", "refs": {"bom_id": existing.id}}
+        kind = spec.get("kind", "manufacture")
+        if kind not in ("manufacture", "kit"):
+            raise UserError("kind must be 'manufacture' or 'kit'.")
+        bom_type = "phantom" if kind == "kit" else "normal"
         T = self.env["product.template"]
         finished = T.browse(int(spec.get("template_id") or 0)).exists()
         if not finished:
@@ -243,13 +249,42 @@ class ElblasyBridgeCatalog(models.AbstractModel):
             seen.add(comp.id)
             lines.append((0, 0, {"product_id": comp.product_variant_id.id,
                                   "product_qty": _number(c.get("qty"), "component quantity", 0.0001)}))  # fmt: skip
-        if self.env["mrp.bom"].search_count([("product_tmpl_id", "=", finished.id)]):
-            raise UserError("This product already has a recipe; editing recipes is not supported yet.")
-        bom = self.env["mrp.bom"].create(
-            {"product_tmpl_id": finished.id, "product_qty": qty, "type": "normal", "bom_line_ids": lines}
-        )
+        Bom = self.env["mrp.bom"]
+        current = Bom.search([("product_tmpl_id", "=", finished.id)], limit=1)
+        if current and not spec.get("replace"):
+            raise UserError("This product already has a recipe; edit it instead.")
+        if current:
+            current.write({"bom_line_ids": [(5, 0, 0)] + lines, "product_qty": qty, "type": bom_type})
+            bom, outcome = current, "updated"
+        else:
+            bom = Bom.create({"product_tmpl_id": finished.id, "product_qty": qty, "type": bom_type, "bom_line_ids": lines})
+            outcome = "created"
         self._tag(xml_name, bom)
-        return {"outcome": "created", "refs": {"bom_id": bom.id}}
+        return {"outcome": outcome, "refs": {"bom_id": bom.id}}
+
+    @api.model
+    def catalog_get_bom(self, template_id):
+        """A product's recipe or kit, with what one unit costs from its components."""
+        self._require_internal_user()
+        if "mrp.bom" not in self.env:
+            return wire({"found": False})
+        t = self.env["product.template"].browse(int(template_id or 0)).exists()
+        bom = self.env["mrp.bom"].search([("product_tmpl_id", "=", t.id)], limit=1) if t else None
+        if not bom:  # no composition yet: the sale price still lets the screen show cost and margin while building
+            return wire({"found": False, **({"price": t.list_price} if t else {})})
+        cur = self.env.company.currency_id
+        comps = []
+        for ln in bom.bom_line_ids:
+            p = ln.product_id
+            comps.append({"template_id": p.product_tmpl_id.id, "name": p.display_name, "qty": ln.product_qty,
+                          "uom": ln.product_uom_id.name, "cost": p.standard_price,
+                          "on_hand": p.qty_available if p.is_storable else None})  # fmt: skip
+        unit_cost = cur.round(sum(c["qty"] * c["cost"] for c in comps) / (bom.product_qty or 1.0))
+        return wire({
+            "found": True, "bom_id": bom.id, "kind": "kit" if bom.type == "phantom" else "manufacture",
+            "quantity": bom.product_qty, "components": comps, "unit_cost": unit_cost, "price": t.list_price,
+            "margin": cur.round(t.list_price - unit_cost),
+        })  # fmt: skip
 
     @api.model
     def catalog_get(self, template_id):

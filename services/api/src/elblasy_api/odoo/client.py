@@ -23,6 +23,7 @@ READ_METHODS = frozenset(
         "catalog_search",
         "catalog_get",
         "catalog_categories",
+        "catalog_get_bom",
         "production_recipes",
         "insights_snapshot",
         "sales_categories",

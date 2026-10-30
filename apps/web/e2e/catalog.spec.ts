@@ -51,10 +51,21 @@ test("grocery owner adds weighed and made products, builds a recipe, and imports
   await page.getByRole("link", { name: "حدّد مكوّناته" }).click();
   await page.getByLabel("ابحث عن مكوّن").fill("دقيق");
   await page.getByRole("button", { name: /دقيق/ }).click();
-  await page.getByLabel("الكمية", { exact: true }).first().fill("2");
+  await page.getByLabel("الكمية: دقيق").fill("2");
   await page.screenshot({ path: "e2e/shots/13-recipe.png", fullPage: true });
   await page.getByRole("button", { name: "حفظ الوصفة" }).click();
   await expect(page.getByText("تم حفظ الوصفة")).toBeVisible();
+
+  // ---- a kit: sold as one item, its parts leave stock at the sale
+  const box = await page.request.post(`/api/connections/${cid}/catalog/products`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: "علبة هدايا", price: 99 } });
+  expect(box.status()).toBe(201);
+  await page.goto(`/inventory/recipe?template=${(await box.json()).template_id}`);
+  await page.getByRole("radio", { name: /طقم يتباع كقطعة واحدة/ }).click();
+  await page.getByLabel("ابحث عن مكوّن").fill("دقيق");
+  await page.getByRole("button", { name: /دقيق/ }).first().click();
+  await expect(page.getByText(/هامش الربح/)).toBeVisible(); // cost and margin as you build it
+  await page.getByRole("button", { name: "حفظ الطقم" }).click();
+  await expect(page.getByText("تم حفظ الطقم")).toBeVisible();
 
   // ---- list + search by barcode
   await page.goto("/inventory");
