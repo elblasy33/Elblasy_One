@@ -103,3 +103,30 @@ test("the UI explains a service that this Odoo does not have instead of failing"
   await expect(page.getByRole("link", { name: "افتح الإعداد" })).toBeVisible();
   await page.screenshot({ path: "e2e/shots/64-capability-off.png", fullPage: true });
 });
+
+test("scale labels: describe the old scale's format, read a real label, and a weighed item found by its scale number", async ({ page }) => {
+  const { cid } = await seed(page.request);
+  await page.goto("/settings/scale");
+  await expect(page.getByRole("heading", { name: "ملصقات الميزان" })).toBeVisible();
+  await page.getByRole("radio", { name: "السعر" }).click();
+  await page.getByLabel("البادئة").fill("26");
+  await page.getByLabel("خانات رقم الصنف").fill("4");
+  await page.getByLabel("خانات الرقم الصحيح").fill("4");
+  await page.getByLabel("خانات الكسر").fill("2");
+  await expect(page.getByText("مجموع الخانات قبل رقم التحقق: 12 / 12")).toBeVisible();
+  await page.getByRole("button", { name: "احفظ الصيغة" }).click();
+  await expect(page.getByText("26....{NNNNDD}")).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/66-scale.png", fullPage: true });
+  const rules = await (await page.request.get(`/api/connections/${cid}/scale/rules`)).json();
+  const rule = rules.items.find((r: { pattern: string }) => r.pattern === "26....{NNNNDD}");
+  const tag = String(Date.now() % 9000 + 1000);
+  const mk = await page.request.post(`/api/connections/${cid}/catalog/products`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: `بسطرمة ${tag}`, price: 400, kind: "weight", scale_rule_id: rule.id, scale_plu: tag } });
+  expect(mk.status()).toBe(201);
+  // a label for 100.00 of it: 26 + item + 010000 + check digit
+  const d12 = `26${tag}010000`;
+  const check = (10 - [...d12].reduce((s, c, i) => s + Number(c) * (i % 2 ? 3 : 1), 0) % 10) % 10;
+  await page.getByLabel("جرّب ملصق حقيقي").fill(d12 + check);
+  await page.getByRole("button", { name: "اقرأ" }).click();
+  await expect(page.getByRole("status").filter({ hasText: `بسطرمة ${tag}` })).toBeVisible();
+  await expect(page.getByText("سعر في الملصق:")).toBeVisible();
+});

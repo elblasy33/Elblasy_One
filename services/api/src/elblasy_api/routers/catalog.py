@@ -38,6 +38,9 @@ class ProductIn(BaseModel):
     price: float = Field(ge=0, le=1e9)
     cost: float | None = Field(default=None, ge=0, le=1e9)
     kind: Literal["unit", "weight", "service"] = "unit"
+    # the item's number on the shop's own scale and the label format it prints (Settings -> Scale labels)
+    scale_rule_id: int | None = Field(default=None, gt=0)
+    scale_plu: str | None = Field(default=None, pattern=r"^\d{1,10}$")
     barcode: str | None = None
     auto_barcode: Literal["none", "internal", "scale"] = "none"
     category: str | None = Field(default=None, max_length=100)
@@ -67,6 +70,14 @@ class ProductIn(BaseModel):
             )
         if self.variants and self.kind == "weight":
             raise ValueError("weighed products cannot have variants")
+        if (self.scale_rule_id is None) != (self.scale_plu is None):
+            raise ValueError("give both the scale label format and the item's number on the scale")
+        if self.scale_rule_id and (
+            self.kind != "weight" or self.barcode or self.auto_barcode != "none"
+        ):
+            raise ValueError(
+                "a scale item number is for products sold by weight, instead of a barcode"
+            )
         return self
 
 
@@ -154,6 +165,8 @@ def _spec(p: ProductIn, barcode: str | None) -> dict[str, Any]:
             spec[k] = v
     if p.variants:
         spec["variants"] = {"attributes": [a.model_dump() for a in p.variants]}
+    if p.scale_rule_id and p.scale_plu:
+        spec.update({"scale_rule_id": p.scale_rule_id, "scale_plu": p.scale_plu})
     return spec
 
 
@@ -233,6 +246,7 @@ def create_product(
         got.get("found") is True and got.get("name") == p.name
         and abs(float(got.get("price", -1)) - p.price) < 0.005
         and (barcode is None or got.get("barcode") == barcode)
+        and (not p.scale_rule_id or got.get("barcode") == client.call_bridge("scale_code_for", p.scale_rule_id, p.scale_plu)["barcode"])
     )  # fmt: skip
     if not ok:
         operations.fail(db, op, "needs_review", "Odoo does not show the product as requested")

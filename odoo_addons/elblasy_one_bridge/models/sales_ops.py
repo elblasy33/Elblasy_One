@@ -307,12 +307,20 @@ class ElblasyBridgeSales(models.AbstractModel):
             return wire({"found": False})
         nom = self.env.company.nomenclature_id if "nomenclature_id" in self.env.company._fields else False
         qty, lookup = 1.0, code
+        priced = None
         if nom:
             parsed = nom.parse_barcode(code)
             if parsed.get("type") == "weight":
                 qty, lookup = parsed["value"], parsed["base_code"]
+            elif parsed.get("type") == "price":  # the label carries the price; the quantity follows from the unit price
+                priced, lookup = parsed["value"], parsed["base_code"]
         P = self.env["product.product"]
         product = P.search([("barcode", "=", lookup), ("available_in_pos", "=", True)], limit=1)
+        if product and priced is not None:
+            unit = self._price_for(cfg, product, 1.0)
+            if not unit:
+                return wire({"found": False})
+            qty = round(priced / unit, 3)
         if not product:  # a weighed barcode's base_code carries the zero-weight form
             product = P.search([("barcode", "=", code), ("available_in_pos", "=", True)], limit=1)
             qty = 1.0

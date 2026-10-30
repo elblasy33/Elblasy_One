@@ -129,6 +129,13 @@ class ElblasyBridgeCatalog(models.AbstractModel):
                 vals["uom_po_id"] = kg.id
 
         barcode = (spec.get("barcode") or "").strip()
+        if spec.get("scale_rule_id"):  # the item's number on the shop's own scales: its labels must find it
+            rule = self.env["barcode.rule"].browse(int(spec["scale_rule_id"])).exists()
+            if not rule:
+                raise UserError("Scale rule not found.")
+            barcode = self._scale_barcode(rule, spec.get("scale_plu"))
+            if "to_weight" in self.env["product.template"]._fields:
+                vals["to_weight"] = True
         if barcode:
             if not re.fullmatch(r"[0-9A-Za-z\-]{3,64}", barcode):
                 raise UserError("Barcode may contain only letters, digits and dashes (3-64).")

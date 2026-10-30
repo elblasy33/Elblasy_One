@@ -1,5 +1,5 @@
 "use client";
-import { ChevronLeft, ChevronRight, History, Keyboard, SlidersHorizontal, PlugZap, ScrollText, ShieldCheck, UserCog, UserRound, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, Keyboard, Scale, SlidersHorizontal, PlugZap, ScrollText, ShieldCheck, UserCog, UserRound, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { Badge, Card } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
@@ -19,6 +19,7 @@ export default function SettingsPage() {
     { href: "/settings/audit", icon: ScrollText, label: "set_audit" as const, show: can("audit.view") },
     { href: "/settings/account", icon: UserRound, label: "set_account" as const, show: true },
     { href: "/settings/features", icon: SlidersHorizontal, label: "fs_title" as const, show: can("config.manage") },
+    { href: "/settings/scale", icon: Scale, label: "sc_title" as const, show: can("config.manage") },
     { href: "/settings/shortcuts", icon: Keyboard, label: "ks_title" as const, show: can("sales.create") },
   ].filter((l) => l.show);
   return (
