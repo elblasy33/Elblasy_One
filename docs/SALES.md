@@ -49,6 +49,10 @@ layer (third-party apps add one); here it is part of the screen.
 - **Keys:** F1 shortcuts · F2 command line · F3 customer · F4/F12 pay · F8 park order · F9 next parked order ·
   ↑/↓ lines · + / − quantity · Delete remove line · Esc clear/deselect. Payment: Enter confirms; Enter with no
   amount pays the exact amount. After the sale: Enter starts the next one, P prints.
+- **Changeable keys:** every shortcut can be rebound under Settings → Keyboard shortcuts (also linked from the
+  F1 help). Bindings are kept per device, because reserved keys differ by machine; a key already used offers a
+  swap, keys browsers often keep (F1, F3, F5, F6, F12, Ctrl+P…) are flagged, and plain letters/arrows are
+  refused on the register because they type or move.
 - **Feedback:** a short high beep when an item is added, a low one when nothing matched (can be muted by setting
   `pos-sound` to `0`), and the added line flashes.
 - **Dialogs** open with the cursor in their first field (the browser's default put it on the close button).

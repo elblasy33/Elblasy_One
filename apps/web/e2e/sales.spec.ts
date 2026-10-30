@@ -234,3 +234,43 @@ test("keyboard-only till: quantity before scan, name search with arrows, quick q
   await page.keyboard.press("Enter");
   await expect(box).toBeFocused();
 });
+
+test("shortcuts can be changed per device: new key, conflict swap, risky and refused keys", async ({ page }) => {
+  const { barcode } = await seed(page.request);
+  await page.goto("/settings/shortcuts");
+  await expect(page.getByRole("heading", { name: "اختصارات الكيبورد" })).toBeVisible();
+  // a plain letter would type into the scan box: refused
+  await page.getByRole("button", { name: "غيّر: الدفع", exact: true }).click();
+  await page.keyboard.press("a");
+  await expect(page.getByText(/حرف عادي بيتكتب/)).toBeVisible();
+  // F6: allowed, flagged because browsers often keep it
+  await page.keyboard.press("F6");
+  await expect(page.getByText("بيروح لشريط العنوان")).toBeVisible();
+  // F8 belongs to "park": offered as a swap
+  await page.getByRole("button", { name: "غيّر: روح لخانة المسح/البحث" }).click();
+  await page.keyboard.press("F8");
+  await expect(page.getByText(/مستخدم بالفعل/)).toBeVisible();
+  await page.getByRole("button", { name: "بدّل بينهم" }).click();
+  await page.screenshot({ path: "e2e/shots/65-shortcuts-settings.png", fullPage: true });
+
+  // the till follows the new keys
+  await page.goto("/sales");
+  const box = page.getByLabel("امسح الباركود أو ابحث باسم المنتج");
+  const opening = page.getByLabel("النقدية الافتتاحية");
+  await expect(opening.or(box)).toBeVisible();
+  if (await opening.isVisible()) {
+    await opening.fill("0");
+    await page.getByRole("button", { name: "فتح الخزنة" }).click();
+  }
+  await box.fill(barcode);
+  await box.press("Enter");
+  await expect(page.getByText(/^1 × /).first()).toBeVisible();
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+  await page.keyboard.press("F4"); // no longer the payment key
+  await expect(page.getByRole("heading", { name: "الدفع" })).toHaveCount(0);
+  await page.keyboard.press("F6");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("F1");
+  await expect(page.getByRole("link", { name: "تعديل الاختصارات" })).toBeVisible();
+});

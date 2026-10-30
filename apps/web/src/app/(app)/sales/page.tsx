@@ -12,6 +12,7 @@ import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
 import { beep, buildIndex, exact, parseCommand, search, type TillItem } from "@/lib/pos-search";
+import { ACTIONS, actionFor, useBindings, type Action } from "@/lib/shortcuts";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
 import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
@@ -110,6 +111,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const [hi, setHi] = useState(0);
   const [help, setHelp] = useState(false);
   const [flash, setFlash] = useState<number | null>(null);
+  const bindings = useBindings();
   const scanRef = useRef<HTMLInputElement>(null);
   const canDiscount = !!me.data?.permissions.includes("sales.discount");
   const canPrice = !!me.data?.permissions.includes("sales.price.override");
@@ -217,19 +219,25 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const closeOrder = (i: number) => { setOrders((o) => (o.length > 1 ? o.filter((_, j) => j !== i) : [{ cart: [], customer: null, note: "" }])); setActive((a) => Math.max(0, a >= i && a > 0 ? a - 1 : a)); setSel(null); };
   const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
   const handleKey = (e: KeyboardEvent) => {
-    if (result) { // after a sale: Enter starts the next one, P prints
-      if (e.key === "Enter") { e.preventDefault(); newSale(); }
-      else if (e.key.toLowerCase() === "p" || e.key === "F5") { e.preventDefault(); window.print(); }
+    const act = actionFor(bindings, e);
+    if (result) { // after a sale: start the next one, or print
+      if (act === "new_sale") { e.preventDefault(); newSale(); }
+      else if (act === "print") { e.preventDefault(); window.print(); }
       return;
     }
     if (tab !== "register" || closing || closed || paying || pickingCustomer) return;
     const el = document.activeElement as HTMLElement | null;
     const inCmd = el === scanRef.current;
     const otherField = !inCmd && !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
-    const fkey = ({ F1: () => setHelp((h) => !h), F2: () => scanRef.current?.focus(), F3: () => { if (cfg.payment_methods.some((m) => m.is_credit)) setPickingCustomer(true); },
-      F4: () => { if (payable) setPaying(true); }, F12: () => { if (payable) setPaying(true); }, F8: () => parkNew(),
-      F9: () => { if (orders.length > 1) { setActive((a) => (a + 1) % orders.length); setSel(null); } } } as Record<string, () => void>)[e.key];
-    if (fkey) { e.preventDefault(); fkey(); return; }
+    const global: Partial<Record<Action, () => void>> = {
+      help: () => setHelp((h) => !h), focus: () => scanRef.current?.focus(),
+      customer: () => { if (cfg.payment_methods.some((m) => m.is_credit)) setPickingCustomer(true); },
+      pay: () => { if (payable) setPaying(true); }, pay_alt: () => { if (payable) setPaying(true); },
+      park: () => parkNew(), next_order: () => { if (orders.length > 1) { setActive((x) => (x + 1) % orders.length); setSel(null); } },
+    };
+    const run = act ? global[act] : undefined;
+    // a plain key is a shortcut only when it cannot be typing (function keys, or with Ctrl/Alt)
+    if (run && (e.key.length > 1 || e.ctrlKey || e.altKey || e.metaKey || !inCmd || scan === "")) { e.preventDefault(); run(); return; }
     if (otherField) return;
     const empty = scan === "";
     const idx = cart.findIndex((c) => c.product_id === sel);
@@ -237,16 +245,16 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
       e.preventDefault();
       const d = e.key === "ArrowDown" ? 1 : -1;
       if (hits.length) setHi((h) => (h + d + hits.length) % hits.length);
-      else if (cart.length) pickLine(cart[(idx < 0 ? (d > 0 ? -1 : 0) : idx) + d < 0 ? cart.length - 1 : ((idx < 0 ? (d > 0 ? -1 : 0) : idx) + d) % cart.length]!.product_id);
+      else if (cart.length) pickLine(cart[(((idx < 0 ? (d > 0 ? -1 : cart.length) : idx) + d) % cart.length + cart.length) % cart.length]!.product_id);
       return;
     }
-    if (empty && selected && (e.key === "+" || e.key === "-")) {
+    if (empty && selected && (act === "qty_up" || act === "qty_down")) {
       e.preventDefault();
-      setQty(selected.product_id, selected.qty + (e.key === "+" ? 1 : -1) * (selected.by_weight ? 0.1 : 1));
+      setQty(selected.product_id, selected.qty + (act === "qty_up" ? 1 : -1) * (selected.by_weight ? 0.1 : 1));
       return;
     }
-    if (empty && selected && e.key === "Delete") { e.preventDefault(); remove(selected.product_id); setSel(null); return; }
-    if (e.key === "Escape") { if (help) setHelp(false); else if (scan) { setScan(""); setHi(0); } else setSel(null); return; }
+    if (empty && selected && act === "delete_line") { e.preventDefault(); remove(selected.product_id); setSel(null); return; }
+    if (act === "clear") { if (help) setHelp(false); else if (scan) { setScan(""); setHi(0); } else setSel(null); return; }
     if (!inCmd && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) scanRef.current?.focus(); // type anywhere
   };
   useEffect(() => { keys.current = handleKey; }); // the listener below always sees the latest state
@@ -304,7 +312,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
               <input ref={scanRef} value={scan} onChange={(e) => { setScan(e.target.value); setNotice(null); setHi(0); }} placeholder={t("pos_scan")} aria-label={t("pos_scan")} autoComplete="off" inputMode="search"
                 role="combobox" aria-expanded={hits.length > 0} aria-controls="pos-hits" aria-activedescendant={hits.length ? `pos-hit-${hits[Math.min(hi, hits.length - 1)]!.id}` : undefined}
                 className="min-h-14 w-full rounded-2xl border-2 border-line bg-surface ps-14 pe-24 text-lg outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
-              <button type="button" onClick={() => setHelp(true)} aria-label={t("pos_keys")} title={t("pos_keys")} className="absolute end-3 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs text-soft hover:text-ink md:flex"><Keyboard className="size-4" aria-hidden /> F1</button>
+              <button type="button" onClick={() => setHelp(true)} aria-label={t("pos_keys")} title={t("pos_keys")} className="absolute end-3 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs text-soft hover:text-ink md:flex"><Keyboard className="size-4" aria-hidden /> {bindings.help}</button>
               {hits.length > 0 && (
                 <ul id="pos-hits" role="listbox" aria-label={t("pos_products")} className="absolute inset-x-0 top-full z-30 mt-1 max-h-96 overflow-auto rounded-2xl border border-line bg-surface p-1 shadow-card">
                   {hits.map((h, i) => (
@@ -434,7 +442,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
               </Card>
             )}
             {cart.length > 0 && <input aria-label={t("pos_note")} placeholder={t("pos_note")} value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="min-h-11 w-full rounded-2xl border border-line bg-surface px-4 text-sm outline-none focus:border-brand" />}
-            <Button onClick={() => setPaying(true)} disabled={!payable} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">F4</kbd></Button>
+            <Button onClick={() => setPaying(true)} disabled={!payable} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">{bindings.pay}</kbd></Button>
             {cart.length > 0 && <button onClick={() => { setCart([]); setSel(null); }} className="w-full text-sm font-bold text-soft hover:text-bad">{t("pos_clear")}</button>}
           </aside>
         </div>
@@ -453,18 +461,20 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
 
 function ShortcutsHelp({ onClose }: { onClose: () => void }) {
   const { t } = useLang();
-  const rows: [string, string][] = [
-    ["F2", t("k_focus")], ["Enter", t("k_enter")], ["3* + " + t("k_scan"), t("k_qty_first")], ["*5", t("k_set_qty")],
-    ["%10", t("k_disc")], ["@25", t("k_price")], ["↑ ↓", t("k_lines")], ["+ / −", t("k_pm")], ["Delete", t("k_delete")],
-    ["Esc", t("k_esc")], ["F3", t("k_customer")], ["F4 / F12", t("k_pay")], ["F8", t("k_park")], ["F9", t("k_next_order")],
-    ["F1", t("k_help")], [t("k_after_sale"), t("k_after_sale_do")],
+  const keys = useBindings();
+  const commands: [string, string][] = [
+    ["Enter", t("k_enter")], ["3* + " + t("k_scan"), t("k_qty_first")], ["*5", t("k_set_qty")],
+    ["%10", t("k_disc")], ["@25", t("k_price")], ["↑ ↓", t("k_lines")],
   ];
+  const row = (k: string, v: string) => <div key={k + v} className="contents"><dt><kbd className="inline-block min-w-12 rounded-lg border border-line bg-surface2 px-2 py-0.5 text-center font-mono font-bold" dir="ltr">{k}</kbd></dt><dd className="self-center">{v}</dd></div>;
   return (
     <Modal title={t("pos_keys")} onClose={onClose}>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-        {rows.map(([k, v]) => <div key={k} className="contents"><dt><kbd className="inline-block min-w-12 rounded-lg border border-line bg-surface2 px-2 py-0.5 text-center font-mono font-bold" dir="ltr">{k}</kbd></dt><dd className="self-center">{v}</dd></div>)}
+        {commands.map(([k, v]) => row(k, v))}
+        {ACTIONS.map((a) => row(keys[a.id], t(a.label)))}
       </dl>
       <p className="mt-4 text-xs text-soft">{t("k_note")}</p>
+      <Link href="/settings/shortcuts" className="mt-3 inline-block text-sm font-bold text-brand">{t("ks_edit")}</Link>
     </Modal>
   );
 }
