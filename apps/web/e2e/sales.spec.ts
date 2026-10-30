@@ -275,3 +275,34 @@ test("shortcuts can be changed per device: new key, conflict swap, risky and ref
   await page.keyboard.press("F1");
   await expect(page.getByRole("link", { name: "تعديل الاختصارات" })).toBeVisible();
 });
+
+test("offers: buy 2 get 1 created in the UI is applied at the till and shown on the cart", async ({ page }) => {
+  const { barcode, cid } = await seed(page.request);
+  const ids = await odoo("ir.module.module", "search", [[["name", "=", "loyalty"], ["state", "!=", "installed"]]]);
+  if (ids.length) await odoo("ir.module.module", "button_immediate_install", [ids]).catch(() => undefined);
+  const tag = String(Date.now() % 100000);
+  const prod = await (await page.request.get(`/api/connections/${cid}/catalog/products?q=${barcode}`)).json();
+  await page.goto("/settings/loyalty");
+  await expect(page.getByRole("heading", { name: "العروض والولاء" })).toBeVisible();
+  await page.getByRole("radio", { name: /اشتري X واحصل على Y/ }).click();
+  await page.getByLabel("اسم العرض").fill(`عرض الشاي ${tag}`);
+  await page.getByLabel("اشتري", { exact: true }).fill("2");
+  await page.getByLabel("واحصل مجانًا على").fill("1");
+  await page.getByLabel("ابحث عن صنف").fill(barcode);
+  await page.getByRole("button", { name: prod.items[0].name }).first().click();
+  await page.getByRole("button", { name: "احفظ العرض" }).click();
+  await expect(page.getByText(`عرض الشاي ${tag}`)).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/67-offers.png", fullPage: true });
+
+  await page.goto("/sales");
+  const box = page.getByLabel("امسح الباركود أو ابحث باسم المنتج");
+  const opening = page.getByLabel("النقدية الافتتاحية");
+  await expect(opening.or(box)).toBeVisible();
+  if (await opening.isVisible()) { await opening.fill("0"); await page.getByRole("button", { name: "فتح الخزنة" }).click(); }
+  await box.fill(`3*${barcode}`);
+  await box.press("Enter");
+  await expect(page.getByRole("list", { name: "العروض" }).getByText(new RegExp(`عرض الشاي ${tag}`))).toBeVisible();
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByText(/^114\.00/).first()).toBeVisible(); // 3 x 57, one of them free
+  await page.screenshot({ path: "e2e/shots/68-offer-at-till.png", fullPage: true });
+});

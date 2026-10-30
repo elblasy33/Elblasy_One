@@ -57,7 +57,7 @@ export interface Readiness {
 }
 
 export interface Product {
-  template_id: number; name: string; sku?: string; barcode?: string; price: number; cost?: number;
+  template_id: number; variant_id?: number | null; name: string; sku?: string; barcode?: string; price: number; cost?: number;
   category?: string; uom: string; on_hand?: number; tracking: string; variant_count: number;
   by_weight: boolean; in_pos: boolean; managed: boolean; active?: boolean;
 }
@@ -76,7 +76,9 @@ export interface PosConfig {
 export interface SalesState { configs: PosConfig[]; currency: string; currency_decimals: number; stock_updates?: string; company?: string }
 export interface SaleProduct { product_id: number; name: string; barcode?: string; price: number; on_hand?: number; by_weight: boolean; tracking?: string; has_image?: boolean }
 export interface QuoteLine { product_id: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
-export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string }
+export interface Reward { program_id: number; reward_id: number; label: string; excl: number; incl: number; points_cost: number }
+export interface Points { program: string; balance: number; earned: number; used: number; after: number; point_value: number; min_redeem: number }
+export interface Quote { lines: QuoteLine[]; total: number; tax: number; currency: string; rewards?: Reward[]; points?: Points | null }
 export interface OrderLine { id?: number; refunded_qty?: number; name: string; qty: number; price_unit: number; discount: number; subtotal_incl: number }
 export interface OrderView {
   id: number; name: string; state: string; date_order: string; amount_total: number; amount_tax: number;

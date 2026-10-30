@@ -50,6 +50,7 @@ export default function ScalePage() {
     <label className="block text-sm font-bold">{label}
       <input type="number" min={k === "dec_digits" ? 0 : 1} max={10} value={f[k]} onChange={(e) => setF({ ...f, [k]: Number(e.target.value) })} dir="ltr" className="mt-1 min-h-11 w-full rounded-xl border border-line bg-surface px-3 text-center" /></label>
   );
+  if (rules.isError) return <ErrorBox message={rules.error instanceof ApiError && rules.error.code !== "network" ? `${errorText(t, rules.error.code)} (${rules.error.code})` : t("err_network")} reference={rules.error instanceof ApiError ? rules.error.correlationId : undefined} />;
   if (!rules.data) return <Spinner label={t("loading")} />;
   return (
     <div className="rise mx-auto max-w-3xl space-y-5">

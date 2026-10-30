@@ -120,6 +120,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                     "discount": l.discount,
                     "subtotal": l.price_subtotal,
                     "subtotal_incl": l.price_subtotal_incl,
+                    "is_reward": bool(l.is_reward_line) if "is_reward_line" in l._fields else False,
                 }
                 for l in o.lines
             ],
@@ -219,6 +220,26 @@ class ElblasyBridgeSales(models.AbstractModel):
         return quoted, currency.round(total), currency.round(tax_total)
 
     @api.model
+    def _reward_lines(self, key, rewards, offset):
+        """Loyalty/promotion rewards as Odoo's own reward lines: negative, taxed like the goods they discount."""
+        out = []
+        for i, r in enumerate(rewards):
+            reward = self.env["loyalty.reward"].browse(r["reward_id"])
+            product = reward.discount_line_product_id
+            if not product:
+                raise UserError("The promotion has no discount product in Odoo.")
+            taxes = self.env["account.tax"].browse(r["tax_ids"])
+            included = any(t.price_include for t in taxes)
+            line = {"uuid": f"{key[:24]}{offset + 1000 + i:08x}", "product_id": product.id, "qty": 1,
+                    "price_unit": r["incl"] if included else r["excl"], "discount": 0, "price_subtotal": r["excl"],
+                    "price_subtotal_incl": r["incl"], "tax_ids": [[6, 0, r["tax_ids"]]], "full_product_name": r["label"]}  # fmt: skip
+            for f, v in (("is_reward_line", True), ("reward_id", reward.id), ("points_cost", r.get("points_cost", 0.0))):
+                if f in self.env["pos.order.line"]._fields:
+                    line[f] = v
+            out.append([0, 0, line])
+        return out
+
+    @api.model
     def _order_lines(self, cfg, key, quoted, raw_lines):
         """Order lines for sync_from_ui. A lot-tracked line is split into one line per lot (first expiry
         first); the money is split in proportion so the order total is unchanged."""
@@ -294,7 +315,11 @@ class ElblasyBridgeSales(models.AbstractModel):
         cfg = self._config(spec.get("config_id"))
         partner = self.env["res.partner"].browse(int(spec.get("partner_id") or 0)).exists() if spec.get("partner_id") else None
         quoted, total, tax = self._quote_lines(cfg, spec.get("lines"), partner or None)
-        return wire({"lines": quoted, "total": total, "tax": tax, "currency": cfg.currency_id.name})
+        rewards, points = self._loyalty_rewards(quoted, partner or None, spec.get("redeem_points"))
+        cur = cfg.currency_id
+        total = cur.round(total + sum(r["incl"] for r in rewards))
+        tax = cur.round(tax + sum(r["incl"] - r["excl"] for r in rewards))
+        return wire({"lines": quoted, "total": total, "tax": tax, "currency": cur.name, "rewards": rewards, "points": points})
 
     @api.model
     def sales_lookup(self, config_id, code):
@@ -356,6 +381,9 @@ class ElblasyBridgeSales(models.AbstractModel):
                        ("product_template_attribute_value_ids.name", "ilike", q)]  # fmt: skip
         if category:
             domain += [("categ_id", "child_of", int(category))]
+        hidden = self._till_hidden_products()
+        if hidden:
+            domain += [("id", "not in", hidden)]
         out = []
         for p in self.env["product.product"].search(domain, limit=limit, offset=max(0, int(offset or 0)), order="name, id"):
             out.append(
@@ -384,7 +412,8 @@ class ElblasyBridgeSales(models.AbstractModel):
         P = self.env["product.product"]
         # names without the "[code]" prefix: the code travels in its own column and is searchable on its own
         prods = P.with_context(display_default_code=False).search(
-            [("available_in_pos", "=", True), ("sale_ok", "=", True)], limit=20000, order="name, id"
+            [("available_in_pos", "=", True), ("sale_ok", "=", True), ("id", "not in", self._till_hidden_products())],
+            limit=20000, order="name, id",
         )
         rows = []
         for p in prods:
@@ -401,7 +430,8 @@ class ElblasyBridgeSales(models.AbstractModel):
         self._need_pos()
         self._config(config_id)
         rows = self.env["product.product"].read_group(
-            [("available_in_pos", "=", True), ("sale_ok", "=", True)], ["categ_id"], ["categ_id"], lazy=False
+            [("available_in_pos", "=", True), ("sale_ok", "=", True), ("id", "not in", self._till_hidden_products())],
+            ["categ_id"], ["categ_id"], lazy=False,
         )
         return wire({"items": [{"id": r["categ_id"][0], "name": r["categ_id"][1].split(" / ")[-1], "count": r["__count"]}
                                for r in rows if r["categ_id"]]})  # fmt: skip
@@ -521,6 +551,9 @@ class ElblasyBridgeSales(models.AbstractModel):
             if not partner:
                 raise UserError("Customer not found.")
         quoted, total, tax = self._quote_lines(cfg, spec.get("lines"), partner)
+        rewards, points = self._loyalty_rewards(quoted, partner, spec.get("redeem_points"))
+        total = cfg.currency_id.round(total + sum(r["incl"] for r in rewards))
+        tax = cfg.currency_id.round(tax + sum(r["incl"] - r["excl"] for r in rewards))
         expected = _num(spec.get("expected_total"), "expected total")
         if abs(expected - total) > TOLERANCE:
             raise UserError(f"PRICE_CHANGED: the total is now {total}, not {expected}. Refresh and retry.")
@@ -581,7 +614,7 @@ class ElblasyBridgeSales(models.AbstractModel):
             "partner_id": partner.id if partner else False,
             "to_invoice": credit_amt > 0,  # the credit part becomes an open invoice for the customer
             "sequence_number": 1,
-            "lines": self._order_lines(cfg, key, quoted, spec["lines"]),
+            "lines": self._order_lines(cfg, key, quoted, spec["lines"]) + self._reward_lines(key, rewards, len(quoted)),
             "payment_ids": [[0, 0, v] for v in pay_vals],
         }
         note_field = self._note_field()
@@ -596,6 +629,7 @@ class ElblasyBridgeSales(models.AbstractModel):
         created = Order.search([("uuid", "=", key)], limit=1)
         if not created:
             raise UserError("Odoo did not create the order.")
+        self._loyalty_settle(created, points)
         return wire({"outcome": "created", "refs": {"order": self._order_view(created)}})
 
     @api.model

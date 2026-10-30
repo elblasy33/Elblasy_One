@@ -30,6 +30,7 @@ export default function PricelistsPage() {
     mutationFn: () => api<{ pricelist: PL }>(`/connections/${cid}/pricelists`, { body: { name: name.trim() }, headers: { "Idempotency-Key": keyFor({ name: name.trim() }) } }),
     onSuccess: (r) => { setName(""); setOpen(r.pricelist.id); void qc.invalidateQueries({ queryKey: ["pricelists"] }); },
   });
+  if (lists.isError) return <ErrorBox message={lists.error instanceof ApiError && lists.error.code !== "network" ? `${errorText(t, lists.error.code)} (${lists.error.code})` : t("err_network")} reference={lists.error instanceof ApiError ? lists.error.correlationId : undefined} />;
   if (!lists.data) return <Spinner label={t("loading")} />;
   return (
     <div className="rise space-y-5">

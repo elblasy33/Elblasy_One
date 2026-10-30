@@ -192,6 +192,7 @@ class ElblasyBridgeCatalog(models.AbstractModel):
             rows.append(
                 {
                     "template_id": t.id,
+                    "variant_id": t.product_variant_id.id or None,
                     "name": t.name,
                     "sku": t.default_code or None,
                     "barcode": t.barcode or None,

@@ -50,6 +50,9 @@ class QuoteIn(BaseModel):
     config_id: int = Field(gt=0)
     lines: list[SaleLine] = Field(min_length=1, max_length=200)
     partner_id: int | None = Field(default=None, gt=0)  # the customer's own price list applies
+    redeem_points: float | None = Field(
+        default=None, gt=0, le=1e9
+    )  # loyalty points the customer spends
 
 
 class PaymentIn(BaseModel):
@@ -135,7 +138,8 @@ def _write_error(db: Session, op: Operation, exc: Exception, what: str) -> Excep
             return api_error(
                 409, "credit_limit_exceeded", msg.removeprefix("CREDIT_LIMIT_EXCEEDED: ")
             )
-        for prefix, status, code in (("SERIALS_REQUIRED", 422, "serials_required"),
+        for prefix, status, code in (("POINTS_SHORT", 422, "points_short"), ("POINTS_MINIMUM", 422, "points_minimum"),
+                                     ("SERIALS_REQUIRED", 422, "serials_required"),
                                      ("SERIAL_NOT_IN_STOCK", 422, "serial_not_in_stock"),
                                      ("LOT_STOCK_SHORT", 409, "lot_stock_short")):  # fmt: skip
             if msg.startswith(prefix):
@@ -334,7 +338,7 @@ def checkout(
         order and order["state"] in PAID_STATES
         and abs(order["amount_total"] - body.expected_total) < MONEY_TOLERANCE
         and abs(order["amount_paid"] - order["amount_total"]) < MONEY_TOLERANCE
-        and _qty_by_product(order["lines"]) == _qty_by_product([ln.model_dump() for ln in body.lines])
+        and _qty_by_product([ln for ln in order["lines"] if not ln.get("is_reward")]) == _qty_by_product([ln.model_dump() for ln in body.lines])
         and abs(sum(p["amount"] for p in order["payments"] if not p["is_change"]) - tendered) < MONEY_TOLERANCE
         and (  # a credit sale must show a posted invoice that is still open for exactly the credit amount
             not order.get("credit_amount")
@@ -360,6 +364,7 @@ def checkout(
                  after={"total": order["amount_total"], "lines": len(order["lines"]),
                         "discount": any(line.discount > 0 for line in body.lines),
                         "price_override": any(line.price_override is not None for line in body.lines),
+                        "rewards": sum(1 for ln in order["lines"] if ln.get("is_reward")), "points_redeemed": body.redeem_points,
                         "on_credit": order.get("credit_amount", 0.0),
                         "credit_override": body.override_credit_limit})  # fmt: skip
     db.commit()

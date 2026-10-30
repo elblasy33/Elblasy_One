@@ -17,7 +17,7 @@ import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/l
 import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
 interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number; tracking?: string; serials?: string[]; override?: number; has_image?: boolean }
-interface Parked { cart: CartItem[]; customer: Customer | null; note: string }
+interface Parked { cart: CartItem[]; customer: Customer | null; note: string; redeem?: number }
 type Mode = "qty" | "disc" | "price";
 const PAGE = 24;
 const loadPark = (key: string): Parked[] => { try { const v = JSON.parse(localStorage.getItem(key) ?? "null") as Parked[] | null; return v && v.length ? v : [{ cart: [], customer: null, note: "" }]; } catch { return [{ cart: [], customer: null, note: "" }]; } };
@@ -96,6 +96,8 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const setCart = (f: CartItem[] | ((c: CartItem[]) => CartItem[])) => setOrders((o) => o.map((x, i) => (i === active ? { ...x, cart: typeof f === "function" ? f(x.cart) : f } : x)));
   const setCustomer = (c: Customer | null) => patch({ customer: c });
   const setNote = (n: string) => patch({ note: n });
+  const redeem = customer ? cur.redeem ?? 0 : 0;
+  const setRedeem = (n: number) => patch({ redeem: n });
   const [sel, setSel] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("qty");
   const [buffer, setBuffer] = useState("");
@@ -133,8 +135,8 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const products = (list.data?.pages ?? []).flatMap((p) => p.items);
   const lines = cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}) }));
   const quote = useQuery({
-    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines), customer?.id ?? 0],
-    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines, ...(customer ? { partner_id: customer.id } : {}) } }),
+    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines), customer?.id ?? 0, redeem],
+    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines, ...(customer ? { partner_id: customer.id } : {}), ...(redeem > 0 ? { redeem_points: redeem } : {}) } }),
     enabled: cart.length > 0, placeholderData: (p) => p, retry: false,
   });
 
@@ -414,6 +416,25 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                 <div className="space-y-1 border-t border-line pt-3">
                   <p className="flex items-baseline justify-between text-2xl font-black"><span>{t("pos_total")}</span><span dir="ltr" aria-live="polite">{quote.data && !stale ? money(total, dec) : "…"} <span className="text-sm">{state.currency}</span></span></p>
                   {quote.data && !stale && <p className="flex justify-between text-xs text-soft"><span>{t("pos_tax")}</span><span dir="ltr">{money(quote.data.tax, dec)}</span></p>}
+                  {!stale && !!quote.data?.rewards?.length && (
+                    <ul className="space-y-0.5 text-sm font-bold text-ok" aria-label={t("pos_offers")}>
+                      {quote.data.rewards.map((r, i) => <li key={i} className="flex justify-between gap-2"><span dir="auto">🎁 {r.label}</span><span dir="ltr">{money(r.incl, dec)}</span></li>)}
+                    </ul>
+                  )}
+                  {!stale && quote.data?.points && (
+                    <div className="space-y-1 rounded-xl bg-brandsoft/60 p-2 text-sm">
+                      <p className="flex justify-between font-bold"><span>⭐ {quote.data.points.program}</span><span dir="ltr">{quote.data.points.balance} → {quote.data.points.after}</span></p>
+                      <p className="text-xs text-soft">{t("pos_points_earn")} <b dir="ltr">{quote.data.points.earned}</b>{quote.data.points.used ? <> · {t("pos_points_used")} <b dir="ltr">{quote.data.points.used}</b></> : null}</p>
+                      {quote.data.points.balance >= quote.data.points.min_redeem && (
+                        <div className="flex items-center gap-2">
+                          <input aria-label={t("pos_points_redeem")} type="number" min={0} max={quote.data.points.balance} step="1" placeholder={String(quote.data.points.min_redeem)} value={redeem || ""}
+                            onChange={(e) => setRedeem(Math.max(0, Math.min(Number(e.target.value) || 0, quote.data!.points!.balance)))} dir="ltr" className="min-h-9 w-24 rounded-lg border border-line bg-surface px-2 text-center" />
+                          <button type="button" onClick={() => setRedeem(redeem ? 0 : quote.data!.points!.balance)} className="text-xs font-bold text-brand">{redeem ? t("pos_points_cancel") : t("pos_points_all")}</button>
+                          <span className="text-xs text-soft">{t("pos_points_worth")} <b dir="ltr">{money((redeem || 0) * quote.data.points.point_value, dec)}</b></span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {quote.error && <ErrorBox message={errMsg(t, quote.error)?.text ?? t("err_generic")} />}
                 </div>
               )}
@@ -449,7 +470,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
       )}
 
       {paying && quote.data && (
-        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} note={note} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
+        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} note={note} redeem={redeem} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
           onDone={(r) => { setPaying(false); setResult(r); }} onRefresh={() => void quote.refetch()} />
       )}
       {help && <ShortcutsHelp onClose={() => { setHelp(false); scanRef.current?.focus(); }} />}
@@ -495,7 +516,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; note: string; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
+function PayDialog({ cid, cfg, cart, customer, note, redeem, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; note: string; redeem: number; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
   const { t } = useLang();
   const keyFor = useIdempotencyKey();
   const normal = cfg.payment_methods.filter((m) => !m.is_credit);
@@ -517,7 +538,7 @@ function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currenc
     ...(due > 0 ? [{ payment_method_id: method, amount: paid }] : []),
     ...(onCredit && creditMethod ? [{ payment_method_id: creditMethod.id, amount: credit }] : []),
   ];
-  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}), ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(note.trim() ? { note: note.trim() } : {}), ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
+  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}), ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(redeem > 0 ? { redeem_points: redeem } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
     mutationFn: (body: typeof payload) => api<SaleResult>(`/connections/${cid}/sales/orders`, { body, headers: { "Idempotency-Key": keyFor(body) } }),
     onSuccess: onDone,
