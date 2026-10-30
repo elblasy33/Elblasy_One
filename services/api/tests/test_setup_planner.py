@@ -189,3 +189,112 @@ def test_electronics_tracks_serials_by_default_and_the_answer_can_turn_it_off():
         build_profile({"vertical": "general", "tracks_serials": True}), MANIFEST, snap()
     )
     assert "serials" in asked["features"]
+
+
+# ---------------- answer-built profiles (no business type) ----------------
+def ids_for(answers):
+    return {q.id for q in visible_questions(answers)}
+
+
+def test_no_business_type_is_asked_and_questions_follow_the_answers():
+    first = ids_for({})
+    assert "vertical" not in first and {"sells", "channels", "payment_methods", "vat"} <= first
+    services_only = ids_for({"sells": ["services"]})
+    assert (
+        not {"uses_weighing_scale", "tracks_expiry", "track_stock", "buys_from_suppliers"}
+        & services_only
+    )
+    assert "scale_labels" not in ids_for({"sells": ["goods"]}) and "scale_labels" in ids_for(
+        {"sells": ["goods"], "uses_weighing_scale": True}
+    )
+    assert "dine_in" in ids_for(
+        {"sells": ["made"], "channels": ["counter"]}
+    ) and "dine_in" not in ids_for({"sells": ["goods"]})
+    assert "daily_volume" not in ids_for({"channels": ["orders"]})
+    assert "credit_limits" in ids_for({"sells_on_credit": True}) and "credit_limits" not in ids_for(
+        {}
+    )
+
+
+def test_answers_compose_capabilities_for_a_mixed_business():
+    # a shop that sells weighed sweets and sized clothes, makes cakes, sells wholesale on credit, is VAT-registered
+    p = build_profile(
+        {
+            "sells": ["goods", "made"],
+            "channels": ["counter", "orders"],
+            "daily_volume": "high",
+            "uses_weighing_scale": True,
+            "scale_labels": True,
+            "needs_variants": True,
+            "tracks_expiry": True,
+            "sells_on_credit": True,
+            "credit_limits": True,
+            "wholesale_prices": True,
+            "vat": "included",
+            "payment_methods": ["cash", "wallet"],
+            "barcodes": "some",
+        }
+    )
+    plan = build_plan(p, MANIFEST, snap())
+    f = set(plan["features"])
+    assert {
+        "weighing",
+        "scale_labels",
+        "variants",
+        "expiry",
+        "lots",
+        "manufacturing",
+        "credit_sales",
+        "credit_limits",
+        "pricelists",
+        "sales_orders",
+        "fast_till",
+        "internal_barcodes",
+        "tax_included_prices",
+        "reorder",
+    } <= f
+    assert plan["unsupported"] == []  # weighed items and sized items can live in one shop
+    st = steps(plan)
+    assert (
+        st["feature_pricelists"]["status"] == "to_apply"
+        and st["feature_tax_included"]["status"] == "to_apply"
+    )
+    assert (
+        st["module_mrp"]["status"] == "to_apply"
+        and st["module_product_expiry"]["status"] == "to_apply"
+    )
+    assert plan["template"]["id"] == "business_profile"
+
+
+def test_services_only_and_tax_answers():
+    p = build_profile({"sells": ["services"], "vat": "not_registered"})
+    plan = build_plan(p, MANIFEST, snap())
+    f = set(plan["features"])
+    assert (
+        "services" in f and "no_sales_tax" in f and "manufacturing" not in f and "weighing" not in f
+    )
+    assert any(n["area"] == "taxes" for n in plan["existing_notes"])
+    assert [x["code"] for x in plan["limitations"]] == ["services"]  # honest, not blocking
+    assert plan["applicable"] in (True, False)  # limitations never decide applicability
+    unanswered = build_plan(build_profile({"sells": ["goods"]}), MANIFEST, snap())
+    assert any("VAT situation not answered" in n["note"] for n in unanswered["existing_notes"])
+
+
+def test_tax_included_is_blocked_after_invoicing_started_and_limitations_are_listed():
+    p = build_profile(
+        {
+            "sells": ["made"],
+            "channels": ["counter", "delivery"],
+            "dine_in": True,
+            "registers": 3,
+            "vat": "included",
+        }
+    )
+    sn = snap(footprint={"posted_moves": 4})
+    plan = build_plan(p, MANIFEST, sn)
+    s = steps(plan)["feature_tax_included"]
+    assert s["status"] == "blocked" and "before the first invoice" in s["blocked_reason"]
+    assert {x["code"] for x in plan["limitations"]} == {"dine_in", "registers", "delivery"}
+    assert p.makes_own_products is True  # "made" asks about recipes, default yes
+    plain = build_profile({"sells": ["goods"], "makes_own_products": True})
+    assert plain.makes_own_products is False  # a hidden answer cannot switch manufacturing on

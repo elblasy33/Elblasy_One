@@ -182,3 +182,96 @@ test("register conveniences: product grid, numpad quantity/price, parked orders 
   await expect(page.getByText(/4 × /).first()).toBeVisible();
   expect(pid).toBeGreaterThan(0);
 });
+
+test("keyboard-only till: quantity before scan, name search with arrows, quick quantity keys, Enter to pay exact", async ({ page }) => {
+  const { barcode, pid, cid } = await seed(page.request);
+  const tag = String(Date.now() % 100000);
+  const extra = await page.request.post(`/api/connections/${cid}/catalog/products`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: `شاي الضحى ${tag}`, price: 10 } });
+  expect(extra.status()).toBe(201);
+  await page.goto("/sales");
+  const box = page.getByLabel("امسح الباركود أو ابحث باسم المنتج");
+  const opening = page.getByLabel("النقدية الافتتاحية");
+  await expect(opening.or(box)).toBeVisible(); // the shift may still be open from the previous test
+  if (await opening.isVisible()) {
+    await opening.fill("0");
+    await page.getByRole("button", { name: "فتح الخزنة" }).click();
+  }
+  await expect(box).toBeFocused();
+
+  // supermarket habit: quantity, *, then the scan (the scanner types the code and Enter)
+  await page.keyboard.type(`3*${barcode}`);
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/^3 × /).first()).toBeVisible();
+
+  // name search on the device, Arabic spelling differences ignored, arrows + Enter
+  await page.keyboard.type(`شاى الضحي ${tag}`); // ى and ي swapped on purpose
+  await expect(page.getByRole("listbox", { name: "المنتجات" }).getByText(`شاي الضحى ${tag}`)).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: new RegExp(`شاي الضحى ${tag}`) }).first()).toBeVisible();
+  await expect(page.getByText(/^1 × /).first()).toBeVisible();
+
+  // correct the quantity of the selected line, then nudge it with +
+  await page.keyboard.type("*2");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/^2 × /).first()).toBeVisible();
+  await page.keyboard.press("+");
+  await expect(page.getByText(/^3 × /)).toHaveCount(2); // the scanned tea and the searched one
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+
+  // shortcuts are discoverable
+  await page.keyboard.press("F1");
+  await expect(page.getByRole("heading", { name: "اختصارات الكيبورد" })).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/29-shortcuts.png", fullPage: true });
+  await page.keyboard.press("Escape");
+
+  // Enter on the empty box opens payment; Enter with no amount pays exactly; Enter starts the next sale
+  await box.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("تم البيع")).toBeVisible();
+  expect((await odoo("product.product", "read", [[pid]], { fields: ["qty_available"] }))[0].qty_available).toBe(17);
+  await page.keyboard.press("Enter");
+  await expect(box).toBeFocused();
+});
+
+test("shortcuts can be changed per device: new key, conflict swap, risky and refused keys", async ({ page }) => {
+  const { barcode } = await seed(page.request);
+  await page.goto("/settings/shortcuts");
+  await expect(page.getByRole("heading", { name: "اختصارات الكيبورد" })).toBeVisible();
+  // a plain letter would type into the scan box: refused
+  await page.getByRole("button", { name: "غيّر: الدفع", exact: true }).click();
+  await page.keyboard.press("a");
+  await expect(page.getByText(/حرف عادي بيتكتب/)).toBeVisible();
+  // F6: allowed, flagged because browsers often keep it
+  await page.keyboard.press("F6");
+  await expect(page.getByText("بيروح لشريط العنوان")).toBeVisible();
+  // F8 belongs to "park": offered as a swap
+  await page.getByRole("button", { name: "غيّر: روح لخانة المسح/البحث" }).click();
+  await page.keyboard.press("F8");
+  await expect(page.getByText(/مستخدم بالفعل/)).toBeVisible();
+  await page.getByRole("button", { name: "بدّل بينهم" }).click();
+  await page.screenshot({ path: "e2e/shots/65-shortcuts-settings.png", fullPage: true });
+
+  // the till follows the new keys
+  await page.goto("/sales");
+  const box = page.getByLabel("امسح الباركود أو ابحث باسم المنتج");
+  const opening = page.getByLabel("النقدية الافتتاحية");
+  await expect(opening.or(box)).toBeVisible();
+  if (await opening.isVisible()) {
+    await opening.fill("0");
+    await page.getByRole("button", { name: "فتح الخزنة" }).click();
+  }
+  await box.fill(barcode);
+  await box.press("Enter");
+  await expect(page.getByText(/^1 × /).first()).toBeVisible();
+  await expect(page.getByText("…").first()).toBeHidden({ timeout: 10_000 });
+  await page.keyboard.press("F4"); // no longer the payment key
+  await expect(page.getByRole("heading", { name: "الدفع" })).toHaveCount(0);
+  await page.keyboard.press("F6");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "الدفع" })).toHaveCount(0); // closed before the next key
+  await page.keyboard.press("F1");
+  await expect(page.getByRole("link", { name: "تعديل الاختصارات" })).toBeVisible();
+});

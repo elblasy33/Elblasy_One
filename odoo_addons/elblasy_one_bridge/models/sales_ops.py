@@ -167,8 +167,14 @@ class ElblasyBridgeSales(models.AbstractModel):
         )
 
     @api.model
-    def _price_for(self, cfg, product, qty):
-        pl = cfg.pricelist_id if "pricelist_id" in cfg._fields else False
+    def _pricelist_for(self, cfg, partner=None):
+        """The customer's own price list when one was set for them (wholesale, special prices), else the till's."""
+        own = partner.specific_property_product_pricelist if partner and "specific_property_product_pricelist" in partner._fields else False
+        return own or (cfg.pricelist_id if "pricelist_id" in cfg._fields else False)
+
+    @api.model
+    def _price_for(self, cfg, product, qty, partner=None):
+        pl = self._pricelist_for(cfg, partner)
         if pl and hasattr(pl, "_get_product_price"):
             return pl._get_product_price(product, qty)
         return product.lst_price
@@ -186,7 +192,7 @@ class ElblasyBridgeSales(models.AbstractModel):
                 raise UserError("A product in the sale is not available for sale.")
             qty = _num(raw.get("qty"), "quantity", minimum=0.0001, maximum=1e6)
             disc = _num(raw.get("discount", 0), "discount", maximum=100.0)
-            unit = self._price_for(cfg, product, qty)
+            unit = self._price_for(cfg, product, qty, partner)
             if raw.get("price_override") is not None:  # allowed only for authorised users (the platform checks and audits)
                 unit = _num(raw["price_override"], "price")
             taxes = product.taxes_id.filtered(lambda t: t.company_id == cfg.company_id)
@@ -286,7 +292,8 @@ class ElblasyBridgeSales(models.AbstractModel):
         self._require_internal_user()
         self._need_pos()
         cfg = self._config(spec.get("config_id"))
-        quoted, total, tax = self._quote_lines(cfg, spec.get("lines"))
+        partner = self.env["res.partner"].browse(int(spec.get("partner_id") or 0)).exists() if spec.get("partner_id") else None
+        quoted, total, tax = self._quote_lines(cfg, spec.get("lines"), partner or None)
         return wire({"lines": quoted, "total": total, "tax": tax, "currency": cfg.currency_id.name})
 
     @api.model
@@ -308,6 +315,9 @@ class ElblasyBridgeSales(models.AbstractModel):
         product = P.search([("barcode", "=", lookup), ("available_in_pos", "=", True)], limit=1)
         if not product:  # a weighed barcode's base_code carries the zero-weight form
             product = P.search([("barcode", "=", code), ("available_in_pos", "=", True)], limit=1)
+            qty = 1.0
+        if not product:  # the shop's own item code (internal reference), typed at the till
+            product = P.search([("default_code", "=ilike", code), ("available_in_pos", "=", True), ("sale_ok", "=", True)], limit=1)
             qty = 1.0
         if not product:
             return wire({"found": False})
@@ -354,6 +364,27 @@ class ElblasyBridgeSales(models.AbstractModel):
                 }
             )
         return wire({"items": out})
+
+    @api.model
+    def sales_catalog(self, config_id):
+        """Everything the till can sell, compact, loaded once when the register opens so scanning, item codes
+        and name search answer instantly on the device. Prices are indicative; the sale is always re-priced by
+        Odoo (quote and checkout), so a price changed meanwhile never slips through."""
+        self._require_internal_user()
+        self._need_pos()
+        cfg = self._config(config_id)
+        P = self.env["product.product"]
+        # names without the "[code]" prefix: the code travels in its own column and is searchable on its own
+        prods = P.with_context(display_default_code=False).search(
+            [("available_in_pos", "=", True), ("sale_ok", "=", True)], limit=20000, order="name, id"
+        )
+        rows = []
+        for p in prods:
+            rows.append([p.id, p.display_name, p.barcode or "", p.default_code or "", self._price_for(cfg, p, 1.0),
+                         1 if ("to_weight" in p._fields and p.to_weight) else 0,
+                         p.tracking if "tracking" in p._fields else "none"])  # fmt: skip
+        return wire({"fields": ["id", "name", "barcode", "code", "price", "by_weight", "tracking"], "rows": rows,
+                     "truncated": len(prods) >= 20000})  # fmt: skip
 
     @api.model
     def sales_categories(self, config_id):
@@ -548,8 +579,9 @@ class ElblasyBridgeSales(models.AbstractModel):
         note_field = self._note_field()
         if note_field and spec.get("note"):
             order[note_field] = str(spec["note"])[:200]
-        if "pricelist_id" in cfg._fields and cfg.pricelist_id:
-            order["pricelist_id"] = cfg.pricelist_id.id
+        pl = self._pricelist_for(cfg, partner)
+        if pl:
+            order["pricelist_id"] = pl.id
         if "default_fiscal_position_id" in cfg._fields and cfg.default_fiscal_position_id:
             order["fiscal_position_id"] = cfg.default_fiscal_position_id.id
         Order.sync_from_ui([order])

@@ -52,6 +52,8 @@ class ElblasyBridgeCustomers(models.AbstractModel):
         v = {"id": p.id, "name": p.name, "phone": p.phone or None, "email": p.email or None}
         limit = p.credit_limit if "credit_limit" in p._fields else 0.0
         v["credit_limit"] = limit or 0.0
+        own = p.specific_property_product_pricelist if "specific_property_product_pricelist" in p._fields else False
+        v["pricelist_id"], v["pricelist"] = (own.id, own.name) if own else (None, None)
         if with_balance:
             bal = self._customer_balance(p)
             v["receivable"] = bal

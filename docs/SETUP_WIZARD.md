@@ -1,5 +1,26 @@
 # Setup wizard, plans and execution
 
+## The business profile (no business type)
+Nobody picks "grocery" or "shoe shop" from a list: no list could cover every small business, and a real shop
+is often a mix (sweets by weight *and* sized clothes; a bakery that also delivers to traders). The wizard asks
+how the business **works**, in five stages, and each answer switches on concrete capabilities:
+
+| Stage | Questions (shown only when relevant) | Switches on |
+|---|---|---|
+| How you sell | what you sell (ready goods / things you make / services), how customers buy (till / orders for traders / delivery), busy-day volume, tills at once, tables, branches | services, sales orders, fast till; honest limits for tables, several tills, delivery tracking, branches |
+| Your goods | by weight (+ scale prints a barcode label), sizes/colours, expiry, serial numbers, buy in one unit and sell in another, barcodes on products, recipes for what you make | weighing, scale labels, variants, expiry + lots, serials, units, internal barcodes, manufacturing |
+| Customers and money | payment methods, known customers, credit and credit limits, retail vs wholesale prices, **VAT situation** | credit sales, credit limits, price lists, *prices include tax* (a real Odoo setting, allowed only before the first invoice) or *no sales tax* (products created without tax) |
+| Buying and stock | follow stock, suppliers, buying on credit, reorder suggestions | supplier credit, reorder |
+| People and devices | who works in the shop, scanner / receipt printer / drawer | (recorded for the next steps) |
+
+A side panel shows, live, what the answers will set up and what this version cannot do yet (*limitations*, never
+blocking). The review page lists every answer with an edit button per stage. The wizard starts from the last
+profile, so it is also where the owner changes the business later: a changed profile builds a new plan that only
+adds. Unanswered questions take sensible defaults; an unanswered VAT question is reported in the plan.
+
+Answers that still carry `vertical` (the first questionnaire) are read with the legacy questions and templates, so
+earlier plans and API clients keep working.
+
 Flow: questionnaire (business language, conditional, AR/EN) -> `BusinessProfile` -> template + features
 -> **dry-run plan** from a live read-only scan -> review/export -> hash-bound approvals.
 

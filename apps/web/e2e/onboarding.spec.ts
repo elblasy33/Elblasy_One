@@ -29,24 +29,32 @@ test("owner signs up, connects Odoo, runs the grocery wizard and the setup is ve
   await page.getByRole("button", { name: "اتصال وفحص" }).click();
   await expect(page).toHaveURL(/\/settings\/setup/);
 
-  // --- wizard
-  await page.getByRole("button", { name: /بقالة/ }).click();
-  await expect(page.getByText("هل تصنّع بعض منتجاتك بنفسك؟")).toBeVisible();
-  await page.waitForTimeout(600); // let the entry animation finish
+  // --- wizard: no business type; the shop is described by how it works, stage by stage
+  await expect(page.getByRole("navigation", { name: "مراحل الإعداد" })).toBeVisible();
+  await expect(page.getByText("ما نوع نشاطك؟")).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /حاجات بتعملها أو بتجهزها بنفسك/ }).click(); // goods are ticked by default
+  await expect(page.getByText("وصفات وتصنيع: المكونات تتخصم والمنتج يتضاف")).toBeVisible(); // live preview
+  await page.waitForTimeout(400);
   await page.screenshot({ path: "e2e/shots/03-wizard-question.png", fullPage: true });
-  const yes = page.getByRole("button", { name: "✅ نعم" });
-  const no = page.getByRole("button", { name: "✖️ لا" });
-  await yes.click(); // makes own products
-  await yes.click(); // weighing scale
-  await no.click(); // expiry
-  await no.click(); // variants
-  await no.click(); // multiple units
-  await yes.click(); // sells on credit
-  await yes.click(); // buys on credit
+  const pick = async (question: string, answer: string) =>
+    page.getByRole("radiogroup", { name: question }).getByRole("radio", { name: answer }).click();
+  await page.getByRole("button", { name: "التالي" }).click();
+  await pick("بتبيع حاجات بالوزن؟", "نعم");
+  await pick("عندك ميزان بيطبع ملصق عليه باركود؟", "نعم");
+  await expect(page.getByText("قراءة ملصقات الميزان بالباركود والوزن جواه")).toBeVisible();
+  await page.getByRole("button", { name: "التالي" }).click();
+  await pick("بتبيع بالآجل (على الحساب)؟", "نعم");
+  await pick("وضعك مع ضريبة القيمة المضافة؟", "مسجّل، والضريبة بتتضاف على السعر");
   await page.screenshot({ path: "e2e/shots/04-wizard-payments.png", fullPage: true });
-  await page.getByRole("button", { name: "التالي" }).click(); // cash preselected
-  await page.getByRole("button", { name: "التالي" }).click(); // 1 branch
-  await page.getByRole("button", { name: "جهّز الخطة" }).click();
+  await page.getByRole("button", { name: "التالي" }).click();
+  await page.getByRole("button", { name: "التالي" }).click();
+  await page.getByRole("button", { name: "التالي" }).click();
+  // review: every answer shown, any stage can be reopened
+  await expect(page.getByText("بتبيع بالآجل (على الحساب)؟")).toBeVisible();
+  await page.getByRole("button", { name: "تعديل" }).first().click();
+  await expect(page.getByRole("checkbox", { name: /حاجات بتعملها/ })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: /المراجعة/ }).click();
+  await page.getByRole("button", { name: "جهّز خطة الإعداد" }).click();
 
   // --- plan review
   await expect(page).toHaveURL(/\/settings\/plans\//);

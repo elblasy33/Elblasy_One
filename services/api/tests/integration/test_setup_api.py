@@ -19,13 +19,21 @@ def connect(client, url, db):
 
 
 def test_questionnaire_flow(client, target):  # noqa: F811
+    # answer-built: no business type is asked; stages, live preview, and questions that follow the answers
     r = client.post("/setup/questionnaire", json={"answers": {}}).json()
-    assert [q["id"] for q in r["questions"]] == ["vertical"] or r["questions"][0][
-        "id"
-    ] == "vertical"
-    assert not r["complete"]
+    ids = [q["id"] for q in r["questions"]]
+    assert "vertical" not in ids and ids[0] == "sells" and not r["complete"] and not r["legacy"]
+    assert [s["id"] for s in r["stages"]] == ["selling", "goods", "money", "buying", "people"]
+    assert r["questions"][0]["options"][0]["text"]["ar"]  # options carry their own words
+    r = client.post("/setup/questionnaire", json={"answers": {"sells": ["services"]}}).json()
+    assert "uses_weighing_scale" not in {q["id"] for q in r["questions"]} and r["complete"]
+    assert (
+        "services" in r["preview"]["features"]
+        and r["preview"]["limitations"][0]["code"] == "services"
+    )
+    # answers that carry the old business type still work
     r = client.post("/setup/questionnaire", json={"answers": {"vertical": "shoes"}}).json()
-    assert "uses_weighing_scale" not in {q["id"] for q in r["questions"]}
+    assert r["legacy"] and "uses_weighing_scale" not in {q["id"] for q in r["questions"]}
     assert client.get("/setup/templates").json()[0]["id"].endswith("_starter")
 
 

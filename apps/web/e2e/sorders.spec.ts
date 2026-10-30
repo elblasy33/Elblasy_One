@@ -66,3 +66,42 @@ test("wholesale order on credit: customer, price per line, deliver, invoice, owe
   await expect(page.getByText("تاجر الجملة").first()).toBeVisible();
   await expect(page.getByText("إجمالي المستحق عليه").or(page.getByText("المستحق")).first()).toBeVisible();
 });
+
+test("price lists: a wholesale list with a quantity break, given to a customer, applied in an order", async ({ page }) => {
+  const email = `pl-${Date.now()}@example.com`;
+  expect((await page.request.post("/api/auth/bootstrap", { data: { business_name: "جملة", email, password: "correct-horse-battery" } })).status()).toBe(201);
+  const { odoo_url, odoo_db } = state();
+  const cid = (await (await page.request.post("/api/connections", { data: { name: "Main", base_url: odoo_url, db_name: odoo_db, login: "admin", secret: "admin" } })).json()).id as string;
+  // price lists switched on (as the Features page would, through a plan)
+  await odoo("res.config.settings", "execute", [[await odoo("res.config.settings", "create", [{ group_product_pricelist: true }])]]).catch(() => undefined);
+  await page.request.post(`/api/connections/${cid}/setup/plans`, { data: { answers: { sells: ["goods"], channels: ["counter", "orders"], wholesale_prices: true } } });
+  const tag = String(Date.now() % 100000);
+  const mk = await page.request.post(`/api/connections/${cid}/catalog/products`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: `زيت ${tag}`, price: 100 } });
+  expect(mk.status()).toBe(201);
+
+  await page.goto("/inventory/pricelists");
+  await page.getByLabel("اسم القائمة (مثلًا: جملة)").fill(`جملة ${tag}`);
+  await page.getByRole("button", { name: "إنشاء قائمة" }).click();
+  await page.getByLabel("أضف سعر لصنف: ابحث بالاسم أو الكود").fill(`زيت ${tag}`);
+  await page.getByRole("button", { name: new RegExp(`زيت ${tag}`) }).click();
+  await page.getByLabel("السعر في القائمة").fill("90");
+  await page.getByRole("button", { name: "حفظ التعديلات" }).click();
+  await expect(page.getByRole("cell", { name: "90.00" })).toBeVisible();
+  await page.getByLabel("أضف سعر لصنف: ابحث بالاسم أو الكود").fill(`زيت ${tag}`);
+  await page.getByRole("button", { name: new RegExp(`زيت ${tag}`) }).click();
+  await page.getByLabel("من كمية").fill("10");
+  await page.getByLabel("السعر في القائمة").fill("85");
+  await page.getByRole("button", { name: "حفظ التعديلات" }).click();
+  await expect(page.getByRole("cell", { name: "85.00" })).toBeVisible();
+  await page.screenshot({ path: "e2e/shots/72-pricelists.png", fullPage: true });
+
+  const cust = (await (await page.request.post(`/api/connections/${cid}/customers`, { headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") }, data: { name: `تاجر ${tag}` } })).json()).customer.id as number;
+  await page.goto(`/money/receivables/${cust}`);
+  await page.getByLabel("قائمة الأسعار").selectOption({ label: `جملة ${tag}` });
+  await expect(page.getByLabel("قائمة الأسعار")).toHaveValue(/\d+/);
+
+  // a sales order for that customer takes the list's price, cheaper from 10 pieces
+  const q = async (qty: number) => (await (await page.request.post(`/api/connections/${cid}/sales-orders/quote`, { data: { partner_id: cust, lines: [{ product_id: (await mk.json()).variant_ids[0], qty }] } })).json()).untaxed as number;
+  expect(await q(1)).toBe(90);
+  expect(await q(10)).toBe(850);
+});

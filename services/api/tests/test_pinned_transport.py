@@ -65,3 +65,46 @@ def test_a_pinned_ip_that_refuses_the_connection_is_reported_safely():
     with pytest.raises(OdooError) as exc:
         BridgeClient(target, creds(), timeout=3).server_version()
     assert "unreachable" in str(exc.value)
+
+
+def test_uid_is_cached_per_credentials_and_dropped_on_access_denied(monkeypatch):
+    import xmlrpc.client
+
+    from elblasy_api.odoo import client as cl
+
+    cl.clear_uid_cache()
+    calls = {"auth": 0}
+
+    class Common:
+        def authenticate(self, *a):
+            calls["auth"] += 1
+            return 7
+
+    class Obj:
+        deny = False
+
+        def execute_kw(self, *a):
+            if Obj.deny:
+                raise xmlrpc.client.Fault(3, "odoo.exceptions.AccessDenied: Access Denied")
+            return {"ok": True}
+
+    def proxy(self, path, timeout=None):
+        return Common() if path == "common" else Obj()
+
+    monkeypatch.setattr(cl.BridgeClient, "_proxy", proxy)
+    target = type("T", (), {"url": "http://odoo.test", "resolved_ips": []})()
+    mk = lambda secret="k": cl.BridgeClient(target, cl.OdooCredentials("db", "admin", secret))  # noqa: E731
+    mk().call_bridge("ping")
+    mk().call_bridge("ping")
+    assert calls["auth"] == 1  # second request reuses the uid
+    mk("other").call_bridge("ping")
+    assert calls["auth"] == 2  # a different secret is a different key
+    Obj.deny = True
+    import pytest
+
+    with pytest.raises(cl.OdooRejectedError):
+        mk().call_bridge("ping")
+    Obj.deny = False
+    mk().call_bridge("ping")
+    assert calls["auth"] == 3  # access denied dropped the cached uid
+    cl.clear_uid_cache()

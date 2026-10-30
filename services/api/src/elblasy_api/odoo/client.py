@@ -4,7 +4,10 @@ Odoo 18 and 19 both serve /xmlrpc/2 today; Odoo 19 deprecates it (removal in 22)
 transport is the single place to swap for /json/2 later.
 """
 
+import hashlib
 import re
+import threading
+import time
 import xmlrpc.client
 from dataclasses import dataclass
 from typing import Any
@@ -20,9 +23,14 @@ READ_METHODS = frozenset(
         "catalog_search",
         "catalog_get",
         "catalog_categories",
+        "catalog_get_bom",
+        "pricelists_list",
+        "pricelist_get",
+        "price_check",
         "production_recipes",
         "insights_snapshot",
         "sales_categories",
+        "sales_catalog",
         "sales_product_image",
         "sorder_products",
         "sorder_quote",
@@ -90,6 +98,9 @@ WRITE_METHODS = frozenset(
         "stock_adjust",
         "expense_create",
         "expense_attach",
+        "pricelist_create",
+        "pricelist_set_price",
+        "customer_set_pricelist",
         "sorder_create",
         "sorder_deliver",
         "sorder_invoice",
@@ -125,6 +136,24 @@ class OdooCredentials:
     secret: str  # API key or password; decrypted from the vault just-in-time
 
 
+# Odoo's `authenticate` re-hashes the password/API key (~0.8 s per call measured on CE 18), while an
+# `execute_kw` with the same credentials costs ~20 ms. The uid is therefore cached per (server, db, login,
+# secret) for a short time: the secret itself is never stored, only a hash of it in the key. A changed or
+# revoked secret produces a different key or an "Access Denied" fault, which drops the entry.
+_UID_TTL = 600.0
+_uid_cache: dict[str, tuple[int, float]] = {}
+_uid_lock = threading.Lock()
+
+
+def _uid_key(base: str, creds: "OdooCredentials") -> str:
+    return hashlib.sha256(f"{base}\0{creds.db}\0{creds.login}\0{creds.secret}".encode()).hexdigest()
+
+
+def clear_uid_cache() -> None:
+    with _uid_lock:
+        _uid_cache.clear()
+
+
 class BridgeClient:
     def __init__(self, target: ValidatedUrl, creds: OdooCredentials, timeout: float = 15.0) -> None:
         self._base = target.url
@@ -154,6 +183,12 @@ class BridgeClient:
 
     def _authenticate(self) -> int:
         if self._uid is None:
+            key = _uid_key(self._base, self._creds)
+            with _uid_lock:
+                hit = _uid_cache.get(key)
+            if hit and hit[1] > time.monotonic():
+                self._uid = hit[0]
+                return self._uid
             try:
                 uid: Any = self._proxy("common").authenticate(
                     self._creds.db, self._creds.login, self._creds.secret, {}
@@ -163,7 +198,14 @@ class BridgeClient:
             if not uid:
                 raise OdooAuthError("Odoo rejected the credentials")
             self._uid = int(uid)
+            with _uid_lock:
+                _uid_cache[key] = (self._uid, time.monotonic() + _UID_TTL)
         return self._uid
+
+    def _forget_uid(self) -> None:
+        with _uid_lock:
+            _uid_cache.pop(_uid_key(self._base, self._creds), None)
+        self._uid = None
 
     def call_bridge(self, method: str, *args: Any, timeout: float | None = None) -> dict[str, Any]:
         if method not in ALLOWED_BRIDGE_METHODS:
@@ -176,6 +218,12 @@ class BridgeClient:
             )
         except xmlrpc.client.Fault as exc:
             text = exc.faultString or ""
+            if "AccessDenied" in text or "Access Denied" in text:
+                # credentials were checked before anything ran: nothing was applied, so drop the cached uid
+                self._forget_uid()
+                raise OdooRejectedError(
+                    "Odoo rejected the call: the Odoo credentials are no longer valid"
+                ) from exc
             if "elblasy.bridge" in text and "not found" in text.lower():
                 raise OdooError("elblasy_one_bridge is not installed on this database") from exc
             reason = _fault_summary(text)

@@ -11,11 +11,15 @@ export interface Connection {
   capabilities: Record<string, boolean> | null; last_health_ok_at: string | null;
 }
 
+export interface QOption { value: string; text: Bilingual; hint?: Bilingual | null }
 export interface Question {
   id: string; kind: "choice" | "bool" | "number" | "multi"; text: Bilingual;
-  options: string[]; default: unknown; answered: boolean;
+  options: (QOption | string)[]; default: unknown; answered: boolean; stage: string; hint?: Bilingual | null; min?: number | null; max?: number | null;
 }
-export interface QuestionnaireOut { questions: Question[]; complete: boolean; profile: Record<string, unknown> | null }
+export interface QuestionnaireOut {
+  legacy: boolean; stages: { id: string; title: Bilingual; intro: Bilingual }[]; questions: Question[]; complete: boolean; profile: Record<string, unknown> | null;
+  preview: { features?: string[]; effects?: (Bilingual & { feature: string })[]; limitations?: (Bilingual & { code: string })[]; unsupported?: { code: string; reason: string }[] };
+}
 
 export interface PlanStep {
   key: string; kind: string; title: Bilingual; params: Record<string, unknown>;
@@ -125,7 +129,7 @@ export interface AuditItem { id: number; ts: string; action: string; outcome: st
 export interface OperationItem { id: string; type: string; status: string; actor: string; created_at: string; updated_at: string; safe_error?: string; verified: boolean; needs_attention: boolean }
 export interface AlertItem { key: string; severity: "critical" | "warning" | "info"; count: number; permission: string; link: string; detail: Record<string, unknown> }
 
-export interface Customer { id: number; name: string; phone?: string; email?: string; credit_limit?: number; receivable?: number; available_credit?: number | null }
+export interface Customer { id: number; name: string; phone?: string; email?: string; credit_limit?: number; receivable?: number; available_credit?: number | null; pricelist_id?: number | null; pricelist?: string | null }
 export interface CustomerInvoice { id: number; name?: string; date?: string; due?: string; amount_total: number; amount_residual: number; payment_state: string; move_type: string }
 export interface CustomerStatement { customer: Customer; invoices: CustomerInvoice[]; payments: { id: number; name: string; date: string; amount: number; journal: string }[] }
 export interface Receivables { total: number; customers: number; top: { name: string; owed: number }[]; overdue: { count: number; amount: number }; currency: string }

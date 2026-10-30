@@ -11,6 +11,7 @@ from elblasy_api.routers import (
     customers,
     money,
     oversight,
+    pricelists,
     production,
     purchasing,
     sales,
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog.router)
     app.include_router(sales.router)
     app.include_router(sorders.router)
+    app.include_router(pricelists.router)
     app.include_router(purchasing.router)
     app.include_router(stock.router)
     app.include_router(money.router)
