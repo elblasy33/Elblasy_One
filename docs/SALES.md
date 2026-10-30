@@ -33,6 +33,32 @@ labels), `POST /sales/quote` (Odoo's pricelist + tax engine), `/sales/orders`, `
 Odoo 19 stores change (`amount_return`) as a negative number, Odoo 18 as positive; the internal-note field is `internal_note` (19) /
 `general_note` (18); session numbering differs. All isolated in small helpers.
 
+## Keyboard-first till (the fast path)
+A busy till is driven from the keyboard and the scanner, never the mouse. Odoo's own POS has no built-in shortcut
+layer (third-party apps add one); here it is part of the screen.
+
+- **One command line** (always focused; typing anywhere goes into it, Arabic-Indic digits accepted):
+  scan or type, then Enter. `3*` before a scan sets the quantity (the supermarket habit: quantity, ×, scan);
+  `3*6221...` in one go works too; `*5` changes the selected line; `%10` gives a discount and `@25` a price
+  (each only with its permission, audited); Enter on an empty line opens payment.
+- **Instant on the device:** when the shift opens, the till loads everything it sells once (`/sales/catalog`:
+  id, name, barcode, item code, price). Exact barcode, then item code, then a ranked, Arabic-aware name search
+  (أ/إ/آ, ة/ه, ى/ي and tashkeel ignored) answer without a network round trip; a results list follows ↑/↓ and
+  Enter. Weighed-item labels and products added after the shift opened go to the server lookup, which now also
+  matches the item code. Odoo still prices every sale (quote and checkout).
+- **Keys:** F1 shortcuts · F2 command line · F3 customer · F4/F12 pay · F8 park order · F9 next parked order ·
+  ↑/↓ lines · + / − quantity · Delete remove line · Esc clear/deselect. Payment: Enter confirms; Enter with no
+  amount pays the exact amount. After the sale: Enter starts the next one, P prints.
+- **Changeable keys:** every shortcut can be rebound under Settings → Keyboard shortcuts (also linked from the
+  F1 help). Bindings are kept per device, because reserved keys differ by machine; a key already used offers a
+  swap, keys browsers often keep (F1, F3, F5, F6, F12, Ctrl+P…) are flagged, and plain letters/arrows are
+  refused on the register because they type or move.
+- **Feedback:** a short high beep when an item is added, a low one when nothing matched (can be muted by setting
+  `pos-sound` to `0`), and the added line flashes.
+- **Dialogs** open with the cursor in their first field (the browser's default put it on the close button).
+
+Measured: every till call to the API takes ~45 ms (it was ~750 ms before the Odoo login was cached).
+
 ## The register screen (compared with Odoo's POS)
 Product grid with category tabs, image tiles (served through the session-protected `/sales/products/{id}/image`), live stock badge and
 "show more"; barcode/search box (F2); a numpad on the selected line with quantity, discount % (needs `sales.discount`) and price

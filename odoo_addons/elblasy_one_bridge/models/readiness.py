@@ -16,7 +16,7 @@ CORE_AUTHORS = {"odoosa", "odoo"}
 # Modules the platform may ever plan to install (also the executor's allowlist later).
 PLANNABLE_MODULES = (
     "account", "sale_management", "purchase", "stock", "stock_account", "point_of_sale",
-    "mrp", "product_expiry", "barcodes", "uom", "sale_stock", "purchase_stock",
+    "mrp", "product_expiry", "barcodes", "uom", "sale_stock", "purchase_stock", "loyalty",
 )  # fmt: skip
 
 
@@ -191,6 +191,8 @@ class ElblasyBridgeReadiness(models.AbstractModel):
             return {
                 "variants": u.has_group("product.group_product_variant"),
                 "uom": u.has_group("uom.group_uom"),
+                "pricelists": u.has_group("product.group_product_pricelist"),
+                "tax_included": (getattr(env.company, "account_price_include", None) == "tax_included") if has("account") else None,
                 "lots": u.has_group("stock.group_production_lot") if has("stock") else None,
                 # when POS sales deduct stock: at every sale ("real") or only at session close
                 "pos_stock_realtime": (

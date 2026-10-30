@@ -1,8 +1,8 @@
 "use client";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, Delete, CheckCircle2, History, Lock, Minus, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, UserRound, XCircle } from "lucide-react";
+import { Banknote, Delete, CheckCircle2, History, Keyboard, Lock, Minus, Plus, Printer, ScanBarcode, Search, ShoppingCart, Trash2, Undo2, UserRound, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { CustomerPicker } from "@/components/customer-picker";
 import { money, Receipt } from "@/components/receipt";
 import { Badge, Button, Card, ErrorBox, Spinner } from "@/components/ui";
@@ -11,11 +11,13 @@ import { cn } from "@/lib/cn";
 import { useHydrated } from "@/lib/hydrated";
 import { useIdempotencyKey } from "@/lib/idem";
 import { errorText, useLang } from "@/lib/i18n";
+import { beep, buildIndex, exact, parseCommand, search, type TillItem } from "@/lib/pos-search";
+import { ACTIONS, actionFor, useBindings, type Action } from "@/lib/shortcuts";
 import { useActiveConnection, useMe, useSalesState, useSessionOrders } from "@/lib/queries";
 import type { CloseResult, Customer, PosConfig, Quote, RefundRequest, SaleProduct, SaleResult, SalesState } from "@/lib/types";
 
 interface CartItem { product_id: number; name: string; price: number; qty: number; by_weight: boolean; discount: number; tracking?: string; serials?: string[]; override?: number; has_image?: boolean }
-interface Parked { cart: CartItem[]; customer: Customer | null; note: string }
+interface Parked { cart: CartItem[]; customer: Customer | null; note: string; redeem?: number }
 type Mode = "qty" | "disc" | "price";
 const PAGE = 24;
 const loadPark = (key: string): Parked[] => { try { const v = JSON.parse(localStorage.getItem(key) ?? "null") as Parked[] | null; return v && v.length ? v : [{ cart: [], customer: null, note: "" }]; } catch { return [{ cart: [], customer: null, note: "" }]; } };
@@ -94,6 +96,8 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const setCart = (f: CartItem[] | ((c: CartItem[]) => CartItem[])) => setOrders((o) => o.map((x, i) => (i === active ? { ...x, cart: typeof f === "function" ? f(x.cart) : f } : x)));
   const setCustomer = (c: Customer | null) => patch({ customer: c });
   const setNote = (n: string) => patch({ note: n });
+  const redeem = customer ? cur.redeem ?? 0 : 0;
+  const setRedeem = (n: number) => patch({ redeem: n });
   const [sel, setSel] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("qty");
   const [buffer, setBuffer] = useState("");
@@ -106,6 +110,10 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const [closing, setClosing] = useState(false);
   const [closed, setClosed] = useState<CloseResult | null>(null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
+  const [hi, setHi] = useState(0);
+  const [help, setHelp] = useState(false);
+  const [flash, setFlash] = useState<number | null>(null);
+  const bindings = useBindings();
   const scanRef = useRef<HTMLInputElement>(null);
   const canDiscount = !!me.data?.permissions.includes("sales.discount");
   const canPrice = !!me.data?.permissions.includes("sales.price.override");
@@ -127,13 +135,27 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const products = (list.data?.pages ?? []).flatMap((p) => p.items);
   const lines = cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}) }));
   const quote = useQuery({
-    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines)],
-    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines } }),
+    queryKey: ["quote", cid, cfg.id, JSON.stringify(lines), customer?.id ?? 0, redeem],
+    queryFn: () => api<Quote>(`/connections/${cid}/sales/quote`, { body: { config_id: cfg.id, lines, ...(customer ? { partner_id: customer.id } : {}), ...(redeem > 0 ? { redeem_points: redeem } : {}) } }),
     enabled: cart.length > 0, placeholderData: (p) => p, retry: false,
   });
 
+  // everything the till sells, loaded once per shift: scans, item codes and names answer on the device
+  const till = useQuery({
+    queryKey: ["till-catalog", cid, cfg.id, session.id],
+    queryFn: () => api<{ fields: string[]; rows: unknown[][]; truncated: boolean }>(`/connections/${cid}/sales/catalog?config_id=${cfg.id}`),
+    staleTime: 5 * 60_000,
+  });
+  const ix = useMemo(() => (till.data ? buildIndex(till.data.fields, till.data.rows) : null), [till.data]);
+  const cmd = parseCommand(scan);
+  const hits = useMemo(() => {
+    if (!ix || cmd.kind !== "add" || cmd.term.length < 2 || /^\d{6,}$/.test(cmd.term)) return [];
+    return search(ix, cmd.term);
+  }, [ix, cmd.kind, cmd.kind === "add" ? cmd.term : ""]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const add = (p: { product_id: number; name: string; price: number; by_weight: boolean; tracking?: string; has_image?: boolean }, qty = 1) => {
     setNotice(null);
+    setFlash(p.product_id); setTimeout(() => setFlash((f) => (f === p.product_id ? null : f)), 700);
     setSel(p.product_id); setBuffer(""); setMode("qty");
     setCart((c) => {
       const i = c.findIndex((x) => x.product_id === p.product_id);
@@ -141,16 +163,32 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
       return [...c, { ...p, qty, discount: 0, ...(p.tracking === "serial" ? { serials: [""] } : {}) }];
     });
   };
+  const fromItem = (it: TillItem) => ({ product_id: it.id, name: it.name, price: it.price, by_weight: it.by_weight, tracking: it.tracking });
+  const ok = () => { setScan(""); setHi(0); beep(true); };
+  const fail = (msg: string) => { setNotice(msg); beep(false); };
+  /** The command line: scan or type, then Enter. "3*" before a scan sets the quantity; "*5" changes the
+   *  selected line; "%10" discount; "@25" price; Enter on an empty line goes to payment. */
   const doScan = async (e: FormEvent) => {
     e.preventDefault();
-    const code = scan.trim();
-    if (!code) return;
-    if (/^[0-9A-Za-z-]{6,64}$/.test(code)) {
-      const r = await api<{ found: boolean; product_id?: number; name?: string; price?: number; qty?: number; by_weight?: boolean; tracking?: string }>(
-        `/connections/${cid}/sales/lookup?config_id=${cfg.id}&code=${encodeURIComponent(code)}`).catch(() => null);
-      if (r?.found && r.product_id) { add({ product_id: r.product_id, name: r.name ?? "", price: r.price ?? 0, by_weight: !!r.by_weight, ...(r.tracking ? { tracking: r.tracking } : {}) }, r.qty ?? 1); setScan(""); return; }
-      if (/^\d{6,}$/.test(code)) { setNotice(t("pos_not_found")); return; }
+    const c = parseCommand(scan);
+    if (c.kind === "empty") { if (payable) setPaying(true); return; }
+    if (c.kind !== "add") {
+      if (!selected) return fail(t("pos_pick_line"));
+      if (c.kind === "set_qty") { if (c.qty > 0) setQty(selected.product_id, c.qty); return ok(); }
+      if (c.kind === "discount") { if (!canDiscount) return fail(t("pos_no_perm")); setCart((x) => x.map((it) => (it.product_id === selected.product_id ? { ...it, discount: Math.min(100, c.value) } : it))); return ok(); }
+      if (!canPrice) return fail(t("pos_no_perm"));
+      setCart((x) => x.map((it) => (it.product_id === selected.product_id ? { ...it, override: c.value } : it)));
+      return ok();
     }
+    const local = ix ? exact(ix, c.term) : null;
+    if (local) { add(fromItem(local), c.qty ?? 1); return ok(); }
+    if (hits.length && !/^\d{6,}$/.test(c.term)) { add(fromItem(hits[Math.min(hi, hits.length - 1)]!), c.qty ?? 1); return ok(); }
+    if (/^[0-9A-Za-z-]{3,64}$/.test(c.term)) { // weighed-item labels, or items added after the shift opened
+      const r = await api<{ found: boolean; product_id?: number; name?: string; price?: number; qty?: number; by_weight?: boolean; tracking?: string }>(
+        `/connections/${cid}/sales/lookup?config_id=${cfg.id}&code=${encodeURIComponent(c.term)}`).catch(() => null);
+      if (r?.found && r.product_id) { add({ product_id: r.product_id, name: r.name ?? "", price: r.price ?? 0, by_weight: !!r.by_weight, ...(r.tracking ? { tracking: r.tracking } : {}) }, c.qty ?? r.qty ?? 1); return ok(); }
+    }
+    fail(t("pos_not_found"));
   };
   const setQty = (id: number, qty: number) => setCart((c) => c.map((x) => {
     if (x.product_id !== id) return x;
@@ -181,15 +219,52 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
   const payable = cart.length > 0 && !!quote.data && !(quote.isPlaceholderData || quote.isFetching) && !cart.some((c) => c.tracking === "serial" && (c.serials ?? []).some((v) => !v.trim()));
   const parkNew = () => { setOrders((o) => [...o, { cart: [], customer: null, note: "" }]); setActive(orders.length); setSel(null); setScan(""); };
   const closeOrder = (i: number) => { setOrders((o) => (o.length > 1 ? o.filter((_, j) => j !== i) : [{ cart: [], customer: null, note: "" }])); setActive((a) => Math.max(0, a >= i && a > 0 ? a - 1 : a)); setSel(null); };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (tab !== "register" || result || closing || closed) return;
-      if (e.key === "F2") { e.preventDefault(); scanRef.current?.focus(); }
-      if (e.key === "F4" && payable && !paying) { e.preventDefault(); setPaying(true); }
+  const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  const handleKey = (e: KeyboardEvent) => {
+    const act = actionFor(bindings, e);
+    if (result) { // after a sale: start the next one, or print
+      if (act === "new_sale") { e.preventDefault(); newSale(); }
+      else if (act === "print") { e.preventDefault(); window.print(); }
+      return;
+    }
+    if (tab !== "register" || closing || closed || paying || pickingCustomer) return;
+    const el = document.activeElement as HTMLElement | null;
+    const inCmd = el === scanRef.current;
+    const otherField = !inCmd && !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
+    const global: Partial<Record<Action, () => void>> = {
+      help: () => setHelp((h) => !h), focus: () => scanRef.current?.focus(),
+      customer: () => { if (cfg.payment_methods.some((m) => m.is_credit)) setPickingCustomer(true); },
+      pay: () => { if (payable) setPaying(true); }, pay_alt: () => { if (payable) setPaying(true); },
+      park: () => parkNew(), next_order: () => { if (orders.length > 1) { setActive((x) => (x + 1) % orders.length); setSel(null); } },
     };
+    const run = act ? global[act] : undefined;
+    // a plain key is a shortcut only when it cannot be typing (function keys, or with Ctrl/Alt)
+    if (run && (e.key.length > 1 || e.ctrlKey || e.altKey || e.metaKey || !inCmd || scan === "")) { e.preventDefault(); run(); return; }
+    if (otherField) return;
+    const empty = scan === "";
+    const idx = cart.findIndex((c) => c.product_id === sel);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const d = e.key === "ArrowDown" ? 1 : -1;
+      if (hits.length) setHi((h) => (h + d + hits.length) % hits.length);
+      else if (cart.length) pickLine(cart[(((idx < 0 ? (d > 0 ? -1 : cart.length) : idx) + d) % cart.length + cart.length) % cart.length]!.product_id);
+      return;
+    }
+    if (empty && selected && (act === "qty_up" || act === "qty_down")) {
+      e.preventDefault();
+      setQty(selected.product_id, selected.qty + (act === "qty_up" ? 1 : -1) * (selected.by_weight ? 0.1 : 1));
+      return;
+    }
+    if (empty && selected && act === "delete_line") { e.preventDefault(); remove(selected.product_id); setSel(null); return; }
+    if (act === "clear") { if (help) setHelp(false); else if (scan) { setScan(""); setHi(0); } else setSel(null); return; }
+    if (!inCmd && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) scanRef.current?.focus(); // type anywhere
+  };
+  useEffect(() => { keys.current = handleKey; }); // the listener below always sees the latest state
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keys.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, result, closing, closed, payable, paying]);
+  }, []);
   const stale = quote.isPlaceholderData || quote.isFetching; // never show a total that no longer matches the cart
   const qLine = (id: number) => (stale ? undefined : quote.data?.lines.find((l) => l.product_id === id));
   const total = quote.data?.total ?? 0;
@@ -236,10 +311,29 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
           <section className="min-w-0 space-y-3">
             <form onSubmit={doScan} className="relative">
               <ScanBarcode className="pointer-events-none absolute start-4 top-1/2 size-6 -translate-y-1/2 text-brand" aria-hidden />
-              <input ref={scanRef} value={scan} onChange={(e) => { setScan(e.target.value); setNotice(null); }} placeholder={t("pos_scan")} aria-label={t("pos_scan")} autoComplete="off" inputMode="search"
-                className="min-h-14 w-full rounded-2xl border-2 border-line bg-surface ps-14 pe-16 text-lg outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
-              <kbd className="pointer-events-none absolute end-4 top-1/2 hidden -translate-y-1/2 rounded-lg border border-line px-2 py-0.5 text-xs text-soft md:block">F2</kbd>
+              <input ref={scanRef} value={scan} onChange={(e) => { setScan(e.target.value); setNotice(null); setHi(0); }} placeholder={t("pos_scan")} aria-label={t("pos_scan")} autoComplete="off" inputMode="search"
+                role="combobox" aria-expanded={hits.length > 0} aria-controls="pos-hits" aria-activedescendant={hits.length ? `pos-hit-${hits[Math.min(hi, hits.length - 1)]!.id}` : undefined}
+                className="min-h-14 w-full rounded-2xl border-2 border-line bg-surface ps-14 pe-24 text-lg outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
+              <button type="button" onClick={() => setHelp(true)} aria-label={t("pos_keys")} title={t("pos_keys")} className="absolute end-3 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-lg border border-line px-2 py-1 text-xs text-soft hover:text-ink md:flex"><Keyboard className="size-4" aria-hidden /> {bindings.help}</button>
+              {hits.length > 0 && (
+                <ul id="pos-hits" role="listbox" aria-label={t("pos_products")} className="absolute inset-x-0 top-full z-30 mt-1 max-h-96 overflow-auto rounded-2xl border border-line bg-surface p-1 shadow-card">
+                  {hits.map((h, i) => (
+                    <li key={h.id} id={`pos-hit-${h.id}`} role="option" aria-selected={i === Math.min(hi, hits.length - 1)}>
+                      <button type="button" onMouseEnter={() => setHi(i)} onClick={() => { add(fromItem(h), cmd.kind === "add" ? cmd.qty ?? 1 : 1); ok(); scanRef.current?.focus(); }}
+                        className={cn("flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-start", i === Math.min(hi, hits.length - 1) ? "bg-brandsoft" : "hover:bg-surface2")}>
+                        <span className="min-w-0"><span className="block truncate font-bold" dir="auto">{h.name}</span><span className="text-xs text-soft" dir="ltr">{[h.code, h.barcode].filter(Boolean).join(" · ")}</span></span>
+                        <span className="shrink-0 font-black text-brand" dir="ltr">{cmd.kind === "add" && cmd.qty ? `${cmd.qty} × ` : ""}{money(h.price, dec)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </form>
+            <p className="hidden flex-wrap gap-x-4 gap-y-1 text-xs text-soft md:flex">
+              <span><kbd className="font-bold text-ink">3*</kbd> {t("pos_hint_qty")}</span><span><kbd className="font-bold text-ink">Enter</kbd> {t("pos_hint_pay")}</span>
+              <span><kbd className="font-bold text-ink">↑↓</kbd> {t("pos_hint_lines")}</span><span><kbd className="font-bold text-ink">+ −</kbd> {t("pos_hint_pm")}</span>
+              {till.data?.truncated && <span className="text-warn">{t("pos_catalog_big")}</span>}
+            </p>
             {notice && <p role="alert" className="font-bold text-bad">{notice}</p>}
             {(cats.data?.items.length ?? 0) > 1 && (
               <div role="tablist" aria-label={t("pos_categories")} className="flex gap-2 overflow-x-auto pb-1">
@@ -284,7 +378,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
             </div>
             {cfg.payment_methods.some((m) => m.is_credit) && (
               <button onClick={() => setPickingCustomer(true)} className="flex min-h-12 w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 font-bold hover:bg-surface2">
-                <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}</span>
+                <span className="flex items-center gap-2"><UserRound className="size-4 text-brand" aria-hidden /> {t("pos_customer")}</span><span className="text-end text-soft" dir="auto">{customer?.name ?? t("pos_no_customer")}{customer?.pricelist && <span className="block text-xs font-bold text-brand">{customer.pricelist}</span>}</span>
               </button>
             )}
             <Card className="space-y-3 p-4">
@@ -294,7 +388,7 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                     const ql = qLine(c.product_id);
                     const on = c.product_id === sel;
                     return (
-                      <li key={c.product_id} className={cn("-mx-2 space-y-2 rounded-xl px-2 py-3", on && "bg-brandsoft/60")}>
+                      <li key={c.product_id} className={cn("-mx-2 space-y-2 rounded-xl px-2 py-3 transition-colors duration-500", on && "bg-brandsoft/60", flash === c.product_id && "bg-oksoft")}>
                         <div className="flex items-start justify-between gap-2">
                           <button onClick={() => pickLine(c.product_id)} className="min-w-0 flex-1 text-start" aria-pressed={on}>
                             <span className="block font-bold" dir="auto">{c.name}</span>
@@ -322,6 +416,25 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
                 <div className="space-y-1 border-t border-line pt-3">
                   <p className="flex items-baseline justify-between text-2xl font-black"><span>{t("pos_total")}</span><span dir="ltr" aria-live="polite">{quote.data && !stale ? money(total, dec) : "…"} <span className="text-sm">{state.currency}</span></span></p>
                   {quote.data && !stale && <p className="flex justify-between text-xs text-soft"><span>{t("pos_tax")}</span><span dir="ltr">{money(quote.data.tax, dec)}</span></p>}
+                  {!stale && !!quote.data?.rewards?.length && (
+                    <ul className="space-y-0.5 text-sm font-bold text-ok" aria-label={t("pos_offers")}>
+                      {quote.data.rewards.map((r, i) => <li key={i} className="flex justify-between gap-2"><span dir="auto">🎁 {r.label}</span><span dir="ltr">{money(r.incl, dec)}</span></li>)}
+                    </ul>
+                  )}
+                  {!stale && quote.data?.points && (
+                    <div className="space-y-1 rounded-xl bg-brandsoft/60 p-2 text-sm">
+                      <p className="flex justify-between font-bold"><span>⭐ {quote.data.points.program}</span><span dir="ltr">{quote.data.points.balance} → {quote.data.points.after}</span></p>
+                      <p className="text-xs text-soft">{t("pos_points_earn")} <b dir="ltr">{quote.data.points.earned}</b>{quote.data.points.used ? <> · {t("pos_points_used")} <b dir="ltr">{quote.data.points.used}</b></> : null}</p>
+                      {quote.data.points.balance >= quote.data.points.min_redeem && (
+                        <div className="flex items-center gap-2">
+                          <input aria-label={t("pos_points_redeem")} type="number" min={0} max={quote.data.points.balance} step="1" placeholder={String(quote.data.points.min_redeem)} value={redeem || ""}
+                            onChange={(e) => setRedeem(Math.max(0, Math.min(Number(e.target.value) || 0, quote.data!.points!.balance)))} dir="ltr" className="min-h-9 w-24 rounded-lg border border-line bg-surface px-2 text-center" />
+                          <button type="button" onClick={() => setRedeem(redeem ? 0 : quote.data!.points!.balance)} className="text-xs font-bold text-brand">{redeem ? t("pos_points_cancel") : t("pos_points_all")}</button>
+                          <span className="text-xs text-soft">{t("pos_points_worth")} <b dir="ltr">{money((redeem || 0) * quote.data.points.point_value, dec)}</b></span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {quote.error && <ErrorBox message={errMsg(t, quote.error)?.text ?? t("err_generic")} />}
                 </div>
               )}
@@ -350,25 +463,50 @@ function Register({ cid, cfg, state }: { cid: string; cfg: PosConfig; state: Sal
               </Card>
             )}
             {cart.length > 0 && <input aria-label={t("pos_note")} placeholder={t("pos_note")} value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="min-h-11 w-full rounded-2xl border border-line bg-surface px-4 text-sm outline-none focus:border-brand" />}
-            <Button onClick={() => setPaying(true)} disabled={!payable} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">F4</kbd></Button>
+            <Button onClick={() => setPaying(true)} disabled={!payable} className="min-h-16 w-full text-xl"><Banknote className="size-6" aria-hidden /> {t("pos_pay")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">{bindings.pay}</kbd></Button>
             {cart.length > 0 && <button onClick={() => { setCart([]); setSel(null); }} className="w-full text-sm font-bold text-soft hover:text-bad">{t("pos_clear")}</button>}
           </aside>
         </div>
       )}
 
       {paying && quote.data && (
-        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} note={note} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
+        <PayDialog cid={cid} cfg={cfg} cart={cart} customer={customer} note={note} redeem={redeem} canOverride={!!me.data?.permissions.includes("customers.credit.override")} total={quote.data.total} currency={state.currency} dec={dec} onClose={() => setPaying(false)}
           onDone={(r) => { setPaying(false); setResult(r); }} onRefresh={() => void quote.refetch()} />
       )}
+      {help && <ShortcutsHelp onClose={() => { setHelp(false); scanRef.current?.focus(); }} />}
       {pickingCustomer && <CustomerPicker cid={cid} onPick={(c) => { setCustomer(c); setPickingCustomer(false); }} onClose={() => setPickingCustomer(false)} />}
       {closing && <CloseDialog cid={cid} session={session} dec={dec} currency={state.currency} onClose={() => setClosing(false)} onDone={(r) => { setClosing(false); setClosed(r); }} />}
     </div>
   );
 }
 
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  const { t } = useLang();
+  const keys = useBindings();
+  const commands: [string, string][] = [
+    ["Enter", t("k_enter")], ["3* + " + t("k_scan"), t("k_qty_first")], ["*5", t("k_set_qty")],
+    ["%10", t("k_disc")], ["@25", t("k_price")], ["↑ ↓", t("k_lines")],
+  ];
+  const row = (k: string, v: string) => <div key={k + v} className="contents"><dt><kbd className="inline-block min-w-12 rounded-lg border border-line bg-surface2 px-2 py-0.5 text-center font-mono font-bold" dir="ltr">{k}</kbd></dt><dd className="self-center">{v}</dd></div>;
+  return (
+    <Modal title={t("pos_keys")} onClose={onClose}>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+        {commands.map(([k, v]) => row(k, v))}
+        {ACTIONS.map((a) => row(keys[a.id], t(a.label)))}
+      </dl>
+      <p className="mt-4 text-xs text-soft">{t("k_note")}</p>
+      <Link href="/settings/shortcuts" className="mt-3 inline-block text-sm font-bold text-brand">{t("ks_edit")}</Link>
+    </Modal>
+  );
+}
+
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
+  useEffect(() => {
+    ref.current?.showModal();
+    // showModal() focuses the first button (the close X); typing should start in the first field instead
+    ref.current?.querySelector<HTMLElement>("input:not([type=checkbox]):not([disabled]), textarea, select")?.focus();
+  }, []);
   return (
     <dialog ref={ref} onClose={onClose} className="m-auto w-[min(94vw,30rem)] rounded-[1.5rem] border border-line bg-surface p-6 text-ink shadow-card backdrop:bg-black/50">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-black">{title}</h2>
@@ -378,7 +516,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; note: string; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
+function PayDialog({ cid, cfg, cart, customer, note, redeem, canOverride, total, currency, dec, onClose, onDone, onRefresh }: { cid: string; cfg: PosConfig; cart: CartItem[]; customer: Customer | null; note: string; redeem: number; canOverride: boolean; total: number; currency: string; dec: number; onClose: () => void; onDone: (r: SaleResult) => void; onRefresh: () => void }) {
   const { t } = useLang();
   const keyFor = useIdempotencyKey();
   const normal = cfg.payment_methods.filter((m) => !m.is_credit);
@@ -400,17 +538,28 @@ function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currenc
     ...(due > 0 ? [{ payment_method_id: method, amount: paid }] : []),
     ...(onCredit && creditMethod ? [{ payment_method_id: creditMethod.id, amount: credit }] : []),
   ];
-  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}), ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(note.trim() ? { note: note.trim() } : {}), ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
+  const payload = { config_id: cfg.id, lines: cart.map((c) => ({ product_id: c.product_id, qty: c.qty, discount: c.discount, ...(c.override !== undefined ? { price_override: c.override } : {}), ...(c.tracking === "serial" ? { serials: (c.serials ?? []).map((v) => v.trim()) } : {}) })), expected_total: total, payments, ...(redeem > 0 ? { redeem_points: redeem } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(customer ? { partner_id: customer.id } : {}), ...(override ? { override_credit_limit: true } : {}) };
   const m = useMutation({
-    mutationFn: () => api<SaleResult>(`/connections/${cid}/sales/orders`, { body: payload, headers: { "Idempotency-Key": keyFor(payload) } }),
+    mutationFn: (body: typeof payload) => api<SaleResult>(`/connections/${cid}/sales/orders`, { body, headers: { "Idempotency-Key": keyFor(body) } }),
     onSuccess: onDone,
     onError: (e) => { if (e instanceof ApiError && e.code === "price_changed") onRefresh(); },
   });
   const e = errMsg(t, m.error);
   const limitHit = m.error instanceof ApiError && m.error.code === "credit_limit_exceeded";
+  /** Keyboard: Enter confirms; Enter with nothing typed pays the exact amount (the common cash case). */
+  const onKeys = (ev: ReactKeyboardEvent) => {
+    if (ev.key !== "Enter" || m.isPending) return;
+    ev.preventDefault();
+    if (ok) return m.mutate(payload);
+    if (isCash && tendered === "" && due > 0 && creditOk && method > 0) {
+      const exactPay = { ...payload, payments: [{ payment_method_id: method, amount: due }, ...payments.slice(1)] };
+      setTendered(String(due));
+      m.mutate(exactPay);
+    }
+  };
   return (
     <Modal title={t("pay_title")} onClose={onClose}>
-      <div className="space-y-4">
+      <div className="space-y-4" onKeyDown={onKeys}>
         <p className="flex items-baseline justify-between text-3xl font-black"><span>{t("pos_total")}</span><span dir="ltr">{money(total, dec)} <span className="text-base">{currency}</span></span></p>
         {customer && <p className="text-sm text-soft">{t("pos_customer")}: <b dir="auto">{customer.name}</b></p>}
         {creditMethod && (
@@ -435,7 +584,7 @@ function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currenc
               <input autoFocus type="number" inputMode="decimal" min="0" step="0.01" value={tendered} onChange={(ev) => setTendered(ev.target.value)} dir="ltr" className="mt-1.5 min-h-14 w-full rounded-2xl border border-line bg-surface px-4 text-center text-3xl font-black outline-none focus:border-brand focus:ring-4 focus:ring-brandsoft" />
             </label>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => setTendered(String(due))} className="min-h-11 rounded-2xl bg-brandsoft px-4 font-bold text-brand">{t("pay_exact")}</button>
+              <button type="button" onClick={() => setTendered(String(due))} className="min-h-11 rounded-2xl bg-brandsoft px-4 font-bold text-brand">{t("pay_exact")}</button>
               {quick.map((q) => <button key={q} onClick={() => setTendered(String(q))} className="min-h-11 rounded-2xl bg-surface2 px-4 font-bold" dir="ltr">{q}</button>)}
             </div>
             <p className={cn("flex items-baseline justify-between text-xl font-black", ok ? "text-ok" : "text-soft")}><span>{ok ? t("pay_change") : t("pay_short")}</span>{ok && <span dir="ltr">{money(change, dec)}</span>}</p>
@@ -445,7 +594,8 @@ function PayDialog({ cid, cfg, cart, customer, note, canOverride, total, currenc
         {limitHit && canOverride && (
           <label className="flex items-start gap-3 rounded-2xl bg-warnsoft p-3 text-sm font-bold text-warn"><input type="checkbox" checked={override} onChange={(ev) => setOverride(ev.target.checked)} className="mt-0.5 size-5" /><span>{t("pos_override")}<span className="block text-xs font-normal">{t("pos_override_hint")}</span></span></label>
         )}
-        <Button onClick={() => m.mutate()} disabled={!ok} loading={m.isPending} className="min-h-14 w-full text-lg">{t("pay_confirm")}</Button>
+        <Button onClick={() => m.mutate(payload)} disabled={!ok} loading={m.isPending} className="min-h-14 w-full text-lg">{t("pay_confirm")} <kbd className="hidden rounded-md border border-brandink/40 px-1.5 text-xs font-normal md:inline">Enter</kbd></Button>
+        {isCash && due > 0 && <p className="hidden text-center text-xs text-soft md:block">{t("pay_enter_exact")}</p>}
       </div>
     </Modal>
   );

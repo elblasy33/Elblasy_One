@@ -1,5 +1,5 @@
 "use client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
@@ -12,7 +12,8 @@ import { errorText, useLang } from "@/lib/i18n";
 import { useConnections, useMe, useShopFeatures } from "@/lib/queries";
 import type { CreatedProduct } from "@/lib/types";
 
-type BarcodeMode = "none" | "type" | "internal" | "scale";
+type BarcodeMode = "none" | "type" | "internal" | "scale" | "plu";
+interface ScaleRule { id: number; name: string; type: string; pattern: string; managed: boolean; format: { prefix: string; plu_digits: number } | null }
 interface Attr { name: string; values: string }
 const SHOES = "36,37,38,39,40,41,42,43,44,45,46";
 const CLOTHES = "S,M,L,XL,XXL";
@@ -53,9 +54,15 @@ export default function NewProductPage() {
   const [attrs, setAttrs] = useState<Attr[]>([{ name: "", values: "" }]);
   const [lot, setLot] = useState(false);
   const [serial, setSerial] = useState(false);
+  const [service, setService] = useState(false);
   const [pos, setPos] = useState(true);
   const [made, setMade] = useState(false);
   const [done, setDone] = useState<CreatedProduct | null>(null);
+  const [plu, setPlu] = useState("");
+  const [ruleId, setRuleId] = useState<number | null>(null);
+  const scaleRules = useQuery({ queryKey: ["scale-rules", cid], queryFn: () => api<{ items: ScaleRule[] }>(`/connections/${cid}/scale/rules`), enabled: !!cid && byWeight, staleTime: 60_000 });
+  const usable = (scaleRules.data?.items ?? []).filter((r) => r.format).sort((a, b) => Number(b.managed) - Number(a.managed));
+  const rule = usable.find((r) => r.id === ruleId) ?? usable[0];
 
   const splitValues = (v: string) => v.split(/[,،]/).map((x) => x.trim()).filter(Boolean);
   const combos = hasVariants ? attrs.reduce((n, a) => n * Math.max(1, splitValues(a.values).length), 1) : 1;
@@ -63,10 +70,11 @@ export default function NewProductPage() {
   const payload = {
     name: name.trim(), price: Number(price || 0),
     ...(canSeeCost && cost !== "" ? { cost: Number(cost) } : {}),
-    kind: byWeight ? "weight" : "unit",
+    kind: service ? "service" : byWeight ? "weight" : "unit",
     ...(mode === "type" && barcode.trim() ? { barcode: barcode.trim() } : {}),
     ...(mode === "internal" ? { auto_barcode: "internal" } : {}),
     ...(mode === "scale" && byWeight ? { auto_barcode: "scale" } : {}),
+    ...(mode === "plu" && byWeight && rule && plu.trim() ? { scale_rule_id: rule.id, scale_plu: plu.trim() } : {}),
     ...(category.trim() ? { category: category.trim() } : {}),
     ...(sku.trim() ? { sku: sku.trim() } : {}),
     ...(serial ? { tracking: "serial" } : lot ? { tracking: "lot" } : {}), pos,
@@ -109,6 +117,7 @@ export default function NewProductPage() {
   const modes: { id: BarcodeMode; label: string }[] = [
     { id: "none", label: t("np_bc_none") }, { id: "type", label: t("np_bc_type") }, { id: "internal", label: t("np_bc_auto") },
     ...(byWeight ? [{ id: "scale" as const, label: t("np_bc_scale") }] : []),
+    ...(byWeight && usable.length ? [{ id: "plu" as const, label: t("np_bc_plu") }] : []),
   ];
 
   return (
@@ -123,7 +132,8 @@ export default function NewProductPage() {
         <Field label={t("np_category")} name="category" value={category} onChange={(e) => setCategory(e.target.value)} />
       </Card>
 
-      {(features.has("weighing") || byWeight) && !hasVariants && (
+      {features.has("services") && <Toggle on={service} onChange={(v) => { setService(v); if (v) { setByWeight(false); setLot(false); setSerial(false); } }} hint={t("np_service_hint")}>{t("np_service")}</Toggle>}
+      {(features.has("weighing") || byWeight) && !hasVariants && !service && (
         <Toggle on={byWeight} onChange={(v) => { setByWeight(v); if (!v && mode === "scale") setMode("none"); if (v) setMode("scale"); }} hint={t("np_weight_hint")}>{t("np_weight")}</Toggle>
       )}
 
@@ -137,6 +147,15 @@ export default function NewProductPage() {
             ))}
           </div>
           {mode === "type" && <Field label={t("np_barcode")} name="barcode" value={barcode} onChange={(e) => setBarcode(e.target.value)} dir="ltr" inputMode="numeric" autoFocus />}
+          {mode === "plu" && rule && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-bold">{t("np_plu_format")}
+                <select value={rule.id} onChange={(e) => setRuleId(Number(e.target.value))} className="mt-1.5 min-h-12 w-full rounded-2xl border border-line bg-surface px-3" dir="ltr">
+                  {usable.map((r) => <option key={r.id} value={r.id}>{r.pattern} · {r.type === "price" ? t("sc_price") : t("sc_weight")}</option>)}
+                </select></label>
+              <Field label={t("np_plu")} name="plu" value={plu} onChange={(e) => setPlu(e.target.value.replace(/\D/g, "").slice(0, rule.format?.plu_digits ?? 10))} dir="ltr" inputMode="numeric" hint={t("np_plu_hint")} />
+            </div>
+          )}
         </Card>
       )}
 
@@ -168,8 +187,8 @@ export default function NewProductPage() {
       )}
 
       <div className="space-y-3">
-        {features.has("lots") && !serial && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
-        {features.has("serials") && !lot && <Toggle on={serial} onChange={setSerial}>{t("np_serial")}</Toggle>}
+        {features.has("lots") && !serial && !service && <Toggle on={lot} onChange={setLot}>{t("np_lot")}</Toggle>}
+        {features.has("serials") && !lot && !service && <Toggle on={serial} onChange={setSerial}>{t("np_serial")}</Toggle>}
         <Toggle on={pos} onChange={setPos}>{t("np_pos")}</Toggle>
         {features.has("manufacturing") && <Toggle on={made} onChange={setMade}>{t("np_made")}</Toggle>}
       </div>

@@ -44,7 +44,11 @@ class ElblasyBridgeSalesOrders(models.AbstractModel):
                 raise UserError(f"'{prod.display_name}' appears twice; merge the lines.")
             seen.add(prod.id)
             qty = _num(r.get("qty"), "quantity", minimum=0.0001, maximum=1e7)
-            price = _num(r["price_unit"], "price") if r.get("price_unit") is not None else prod.lst_price
+            if r.get("price_unit") is not None:
+                price = _num(r["price_unit"], "price")
+            else:  # the customer's price list (wholesale, quantity breaks), else the shelf price
+                own = partner.specific_property_product_pricelist if partner and "specific_property_product_pricelist" in partner._fields else False
+                price = own._get_product_price(prod, qty) if own else prod.lst_price
             disc = _num(r.get("discount", 0), "discount", maximum=100.0)
             taxes = prod.taxes_id.filtered(lambda t: t.company_id == company)
             res = taxes.compute_all(price * (1 - disc / 100.0), cur, qty, product=prod, partner=partner)

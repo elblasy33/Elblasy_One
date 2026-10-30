@@ -23,6 +23,7 @@ FEATURES = {
     "variants": "group_product_variant",
     "uom": "group_uom",
     "lots": "group_stock_production_lot",
+    "pricelists": "group_product_pricelist",
 }
 JOURNAL_TYPES = ("cash", "bank")
 
@@ -107,6 +108,14 @@ class ElblasyBridgeSetup(models.AbstractModel):
             if company.point_of_sale_update_stock_quantities == "real":
                 return {"outcome": "already_exists", "refs": {"feature": feature}}
             company.write({"point_of_sale_update_stock_quantities": "real"})
+            return {"outcome": "enabled", "refs": {"feature": feature}}
+        if feature == "tax_included":
+            company = self.env.company
+            if "account_price_include" not in company._fields:
+                raise UserError("This Odoo has no tax-included price setting.")
+            if company.account_price_include == "tax_included":
+                return {"outcome": "already_exists", "refs": {"feature": feature}}
+            company.write({"account_price_include": "tax_included"})  # Odoo refuses once invoicing started
             return {"outcome": "enabled", "refs": {"feature": feature}}
         field = FEATURES.get(feature)
         if not field:

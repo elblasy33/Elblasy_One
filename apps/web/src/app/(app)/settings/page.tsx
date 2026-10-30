@@ -1,5 +1,5 @@
 "use client";
-import { ChevronLeft, ChevronRight, History, PlugZap, ScrollText, ShieldCheck, UserCog, UserRound, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Gift, History, Keyboard, Scale, SlidersHorizontal, PlugZap, ScrollText, ShieldCheck, UserCog, UserRound, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { Badge, Card } from "@/components/ui";
 import { useLang } from "@/lib/i18n";
@@ -18,6 +18,10 @@ export default function SettingsPage() {
     { href: "/settings/users", icon: UserCog, label: "set_users" as const, show: can("users.manage") },
     { href: "/settings/audit", icon: ScrollText, label: "set_audit" as const, show: can("audit.view") },
     { href: "/settings/account", icon: UserRound, label: "set_account" as const, show: true },
+    { href: "/settings/features", icon: SlidersHorizontal, label: "fs_title" as const, show: can("config.manage") },
+    { href: "/settings/loyalty", icon: Gift, label: "lo_title" as const, show: can("sales.price.override") },
+    { href: "/settings/scale", icon: Scale, label: "sc_title" as const, show: can("config.manage") },
+    { href: "/settings/shortcuts", icon: Keyboard, label: "ks_title" as const, show: can("sales.create") },
   ].filter((l) => l.show);
   return (
     <div className="rise space-y-6">

@@ -18,6 +18,7 @@ from elblasy_api.odoo.client import BridgeClient, OdooError, OdooRejectedError, 
 from elblasy_api.routers.connections import _client, _owned
 from elblasy_api.security.rbac import P_COST_VISIBLE, P_PRODUCTS, P_PRODUCTS_VIEW, has_permission
 from elblasy_api.security.vault import SecretVault
+from elblasy_api.setup.planner import shop_features
 
 router = APIRouter(prefix="/connections/{cid}/catalog", tags=["catalog"])
 IDEM = Annotated[
@@ -36,7 +37,10 @@ class ProductIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     price: float = Field(ge=0, le=1e9)
     cost: float | None = Field(default=None, ge=0, le=1e9)
-    kind: Literal["unit", "weight"] = "unit"
+    kind: Literal["unit", "weight", "service"] = "unit"
+    # the item's number on the shop's own scale and the label format it prints (Settings -> Scale labels)
+    scale_rule_id: int | None = Field(default=None, gt=0)
+    scale_plu: str | None = Field(default=None, pattern=r"^\d{1,10}$")
     barcode: str | None = None
     auto_barcode: Literal["none", "internal", "scale"] = "none"
     category: str | None = Field(default=None, max_length=100)
@@ -66,6 +70,14 @@ class ProductIn(BaseModel):
             )
         if self.variants and self.kind == "weight":
             raise ValueError("weighed products cannot have variants")
+        if (self.scale_rule_id is None) != (self.scale_plu is None):
+            raise ValueError("give both the scale label format and the item's number on the scale")
+        if self.scale_rule_id and (
+            self.kind != "weight" or self.barcode or self.auto_barcode != "none"
+        ):
+            raise ValueError(
+                "a scale item number is for products sold by weight, instead of a barcode"
+            )
         return self
 
 
@@ -78,6 +90,9 @@ class RecipeIn(BaseModel):
     template_id: int = Field(gt=0)
     quantity: float = Field(default=1, gt=0, le=1e9)
     components: list[RecipeLine] = Field(min_length=1, max_length=50)
+    # manufacture: made in batches (production orders); kit: sold as one item, components leave stock at the sale
+    kind: Literal["manufacture", "kit"] = "manufacture"
+    replace: bool = False  # change an existing recipe (future use only; history stays)
 
 
 def _conn(
@@ -112,14 +127,28 @@ def _take(db: Session, cid: uuid.UUID, kind: str) -> int:
     raise api_error(503, "sequence_busy", "Could not allocate a barcode, try again")
 
 
-def _make_barcode(db: Session, cid: uuid.UUID, kind: str) -> str:
-    n = _take(db, cid, kind)
-    try:
-        return scale_barcode(n) if kind == "scale" else internal_barcode(n)
-    except ValueError as exc:
-        raise api_error(
-            409, "barcode_space_exhausted", "No more automatic barcodes available"
-        ) from exc
+def _make_barcode(
+    db: Session, cid: uuid.UUID, kind: str, client: BridgeClient | None = None
+) -> str:
+    """Next automatic barcode that Odoo does not already use. Numbers are per connection, so a second
+    connection (or a re-connect) to the same Odoo would otherwise walk into codes already taken: each
+    candidate is checked against Odoo (one fast read) and taken ones are skipped, keeping codes sequential."""
+    for _ in range(200):
+        try:
+            n = _take(db, cid, kind)
+            code = scale_barcode(n) if kind == "scale" else internal_barcode(n)
+        except ValueError as exc:
+            raise api_error(
+                409, "barcode_space_exhausted", "No more automatic barcodes available"
+            ) from exc
+        if client is None:
+            return code
+        try:
+            if code not in client.call_bridge("catalog_barcodes_taken", [code]).get("taken", []):
+                return code
+        except OdooError:
+            return code  # Odoo still refuses a duplicate on create; the caller then retries
+    raise api_error(409, "barcode_space_exhausted", "No free automatic barcode found")
 
 
 def _spec(p: ProductIn, barcode: str | None) -> dict[str, Any]:
@@ -136,6 +165,8 @@ def _spec(p: ProductIn, barcode: str | None) -> dict[str, Any]:
             spec[k] = v
     if p.variants:
         spec["variants"] = {"attributes": [a.model_dump() for a in p.variants]}
+    if p.scale_rule_id and p.scale_plu:
+        spec.update({"scale_rule_id": p.scale_rule_id, "scale_plu": p.scale_plu})
     return spec
 
 
@@ -153,7 +184,7 @@ def create_product(
     planned = (op.odoo_refs or {}).get("planned_barcode")
     barcode = p.barcode or planned
     if not barcode and p.auto_barcode != "none":
-        barcode = _make_barcode(db, c.id, p.auto_barcode)
+        barcode = _make_barcode(db, c.id, p.auto_barcode, client)
     # persist the chosen barcode before calling Odoo so a retry reuses it
     op.odoo_refs = {"planned_barcode": barcode} if barcode else None
     db.commit()
@@ -163,7 +194,18 @@ def create_product(
     for attempt in range(attempts):
         try:
             res = client.call_bridge(
-                "catalog_upsert_product", str(op.id), key, _spec(p, barcode), timeout=60
+                "catalog_upsert_product",
+                str(op.id),
+                key,
+                {
+                    **_spec(p, barcode),
+                    **(
+                        {"no_tax": True}
+                        if "no_sales_tax" in shop_features(db, user.tenant_id, c.id)
+                        else {}
+                    ),
+                },
+                timeout=60,
             )
             break
         except OdooUncertainError as exc:
@@ -176,8 +218,8 @@ def create_product(
         except OdooRejectedError as exc:
             if "already used" in str(exc) and p.auto_barcode != "none" and attempt < attempts - 1:
                 barcode = _make_barcode(
-                    db, c.id, p.auto_barcode
-                )  # collision with an existing code: next one
+                    db, c.id, p.auto_barcode, client
+                )  # collision: next free one
                 op.odoo_refs = {"planned_barcode": barcode}
                 db.commit()
                 continue
@@ -204,6 +246,7 @@ def create_product(
         got.get("found") is True and got.get("name") == p.name
         and abs(float(got.get("price", -1)) - p.price) < 0.005
         and (barcode is None or got.get("barcode") == barcode)
+        and (not p.scale_rule_id or got.get("barcode") == client.call_bridge("scale_code_for", p.scale_rule_id, p.scale_plu)["barcode"])
     )  # fmt: skip
     if not ok:
         operations.fail(db, op, "needs_review", "Odoo does not show the product as requested")
@@ -338,6 +381,24 @@ def patch_product(
     )  # fmt: skip
 
 
+@router.get("/recipes/{template_id}")
+def get_recipe(
+    cid: uuid.UUID, template_id: int, user: User = Depends(require(P_PRODUCTS_VIEW)),
+    db: Session = Depends(get_session), s: Settings = Depends(get_settings), vault: SecretVault = Depends(get_vault),
+) -> dict[str, Any]:  # fmt: skip
+    _, client = _conn(db, user, cid, s, vault)
+    try:
+        got = client.call_bridge("catalog_get_bom", template_id)
+    except OdooError as exc:
+        raise api_error(502, "odoo_unavailable", str(exc)) from exc
+    if not has_permission(user.role, P_COST_VISIBLE):  # costs only for those who may see them
+        got.pop("unit_cost", None)
+        got.pop("margin", None)
+        for c in got.get("components", []):
+            c.pop("cost", None)
+    return got
+
+
 @router.post("/recipes", status_code=201)
 def post_recipe(
     cid: uuid.UUID, body: RecipeIn, idem: IDEM, request: Request,
@@ -369,15 +430,29 @@ def post_recipe(
     except OdooError as exc:
         operations.fail(db, op, "needs_review", str(exc))
         raise api_error(502, "odoo_unavailable", str(exc)) from exc
-    out = {**res["refs"], "outcome": res["outcome"], "replayed": False}
-    operations.succeed(
-        db,
-        op,
-        out,
-        {"verified": True, "method": "bridge confirmation (bom id returned by ORM create)"},
-    )
-    audit.record(db, request, action="catalog.recipe.create", outcome="success", actor=user,
-                 target_type="bom", target_id=out["bom_id"])  # fmt: skip
+    # independent check: read the recipe back from Odoo and compare with what was asked
+    try:
+        got = client.call_bridge("catalog_get_bom", body.template_id)
+    except OdooError as exc:
+        operations.fail(db, op, "needs_review", str(exc))
+        raise api_error(
+            502, "verification_unavailable", "Saved, but could not verify. Retry with the same key."
+        ) from exc
+    want = sorted((ln.template_id, round(ln.qty, 6)) for ln in body.components)
+    have = sorted((c["template_id"], round(c["qty"], 6)) for c in got.get("components", []))
+    if (
+        not got.get("found")
+        or got["kind"] != body.kind
+        or abs(got["quantity"] - body.quantity) > 1e-6
+        or want != have
+    ):
+        operations.fail(db, op, "needs_review", "Odoo does not show the recipe as requested")
+        raise api_error(502, "verification_failed", "Odoo does not show the recipe as requested")
+    out = {**res["refs"], "outcome": res["outcome"], "replayed": False, "recipe": got}
+    operations.succeed(db, op, out, {"verified": True, "method": "catalog_get_bom readback"})
+    audit.record(db, request, action="catalog.recipe.update" if res["outcome"] == "updated" else "catalog.recipe.create",
+                 outcome="success", actor=user, target_type="bom", target_id=out["bom_id"],
+                 after={"kind": body.kind, "components": len(body.components)})  # fmt: skip
     db.commit()
     return out
 
